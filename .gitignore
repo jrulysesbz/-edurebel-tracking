@@ -1,0 +1,11 @@
+# local secrets & keys (keep public keys allowed)
+id_*
+*.pem
+*.key
+*.p12
+*.env
+.env.*
+!*.pub
+
+# macOS noise
+.DS_Store
