@@ -1,3 +1,25 @@
+# EDURebel Student Tracking App
+
+A low-code Supabase/Postgres backend for teachers to track students with a unique ID across behavior, attendance, and parent communication.  
+
+---
+
+## ✨ Features
+- 🔒 Secure RLS-first design (least privilege access)  
+- 👨‍🏫 Roles: Admin, Teacher, Sub, Parent  
+- 🧾 Immutable logs with soft-update windows  
+- 🌐 Timezone: UTC storage, Asia/Taipei display  
+- 🗄️ Idempotent migrations for safe re-runs  
+
+---
+
+## 🛠️ Setup
+
+1. **Clone the repository**
+   ```bash
+   git clone https://github.com/jrulysesbz/-edurebel-tracking.git
+   cd -edurebel-tracking
+
 # edurebel-tracking
 
 - **Schema snapshot**: `schema-lockin.backup` (pg_dump custom format)
