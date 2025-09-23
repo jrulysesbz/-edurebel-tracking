@@ -12,3 +12,4 @@ Deno.serve(async (req) => {
     return new Response(JSON.stringify({ msg: e?.message ?? String(e) }), { status: 400, headers: { 'content-type': 'application/json', ...cors } });
   }
 });
+// TODO: import { corsHeaders } from '../_shared/cors.ts' and use in responses
