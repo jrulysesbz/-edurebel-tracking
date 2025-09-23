@@ -13,7 +13,8 @@
     "sb:fns:logs:risk": "bash -lc 'tail -n 200 -F /tmp/sb-fns.log | grep -i --line-buffered risk-scan || true'",
     "sb:fns:logs:notify": "bash -lc 'tail -n 200 -F /tmp/sb-fns.log | grep -i --line-buffered notify-guardian || true'",
     "sb:fns:logs:weekly": "bash -lc 'tail -n 200 -F /tmp/sb-fns.log | grep -i --line-buffered weekly-reports || true'",
-    "migrations:check": "bash scripts/check-migration-order.sh"
+    "migrations:check": "bash scripts/check-migration-order.sh",
+    "sb:smoke:edge": "bash scripts/smoke-edge.sh"
   },
   "repository": {
     "type": "git",
