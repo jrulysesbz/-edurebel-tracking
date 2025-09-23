@@ -13,3 +13,7 @@ supabase/functions/.env
 supabase/migrations/*.bak
 supabase/.temp/
 node_modules/
+
+# track the example env, but ignore real secrets
+supabase/functions/.env
+!supabase/functions/.env.example
