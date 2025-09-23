@@ -1,0 +1,12 @@
+name: CI
+on: [push, pull_request]
+jobs:
+  supabase-migrate-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '20' }
+      - run: sudo apt-get update && sudo apt-get install -y jq moreutils
+      - run: npm i
+      - run: npm run migrations:check
