@@ -1,0 +1,29 @@
+{
+  "name": "edurebel-tracking",
+  "version": "1.0.0",
+  "description": "- **Schema snapshot**: `schema-lockin.backup` (pg_dump custom format) - **Tag**: `v1.0-lockin` – “Production lock-in (120m window)” - Supabase local dev is in `supabase/`.",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "sb:env": "bash -lc 'source ~/.supabase-dev.sh && sb-env'",
+    "sb:fns:restart": "bash -lc 'source ~/.supabase-dev.sh && sb-fns-restart'",
+    "sb:smoke": "bash -lc 'source ~/.supabase-dev.sh && sb-env && sb-jwt && sb-smoke'",
+    "sb:up": "bash -lc 'source ~/.supabase-dev.sh && sb-up'",
+    "sb:fns:logs": "bash -lc 'tail -n 200 -F /tmp/sb-fns.log'",
+    "sb:fns:logs:risk": "bash -lc 'tail -n 200 -F /tmp/sb-fns.log | grep -i --line-buffered risk-scan || true'",
+    "sb:fns:logs:notify": "bash -lc 'tail -n 200 -F /tmp/sb-fns.log | grep -i --line-buffered notify-guardian || true'",
+    "sb:fns:logs:weekly": "bash -lc 'tail -n 200 -F /tmp/sb-fns.log | grep -i --line-buffered weekly-reports || true'"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jrulysesbz/-edurebel-tracking.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/jrulysesbz/-edurebel-tracking/issues"
+  },
+  "homepage": "https://github.com/jrulysesbz/-edurebel-tracking#readme"
+}

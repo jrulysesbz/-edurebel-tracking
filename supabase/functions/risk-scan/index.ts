@@ -1,0 +1,22 @@
+import { requireJWT, cors, sbUser } from '../_shared/util.ts';
+Deno.serve(async (req) => {
+  // --- CORS preflight ---
+  if (req.method === 'OPTIONS') {
+    return new Response(null, { status: 204, headers: cors });
+  }
+  try {
+    const auth = await requireJWT(req.headers.get('authorization') ?? '');
+    const url = new URL(req.url);
+    const limit = Number(url.searchParams.get('limit') ?? '10');
+    const sb = sbUser(auth);
+    const { data, error } = await sb
+      .from('v_student_risk')
+      .select('*')
+      .order('recent_incidents', { ascending: false })
+      .limit(limit);
+    if (error) throw error;
+    return new Response(JSON.stringify({ items: data ?? [] }), { headers: { 'content-type': 'application/json', ...cors } });
+  } catch (e: any) {
+    return new Response(JSON.stringify({ msg: e?.message ?? String(e) }), { status: 400, headers: { 'content-type': 'application/json', ...cors } });
+  }
+});
