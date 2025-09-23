@@ -1,0 +1,27 @@
+import { requireJWT, cors, sbService } from '../_shared/util.ts';
+Deno.serve(async (req) => {
+  try {
+    await requireJWT(req.headers.get('authorization') ?? '');
+    const { student_id, topic, message, channels = ['email'] } = await req.json();
+    if (!student_id || !topic || !message) throw new Error('student_id, topic, message required');
+
+    const svc = sbService();
+    const { data: stu, error: e1 } = await svc
+      .from('students')
+      .select('id,school_id')
+      .eq('id', student_id)
+      .single();
+    if (e1) throw e1;
+
+    const { data, error } = await svc
+      .from('parent_comms')
+      .insert({ student_id: stu.id, school_id: stu.school_id, guardian_id: null, topic, message, channels })
+      .select('id,created_at')
+      .single();
+    if (error) throw error;
+
+    return new Response(JSON.stringify({ ok: true, comm_id: data.id, created_at: data.created_at }), { headers: { 'content-type': 'application/json', ...cors } });
+  } catch (e: any) {
+    return new Response(JSON.stringify({ msg: e?.message ?? String(e) }), { status: 400, headers: { 'content-type': 'application/json', ...cors } });
+  }
+});

@@ -9,3 +9,7 @@ id_*
 
 # macOS noise
 .DS_Store
+supabase/functions/.env
+supabase/migrations/*.bak
+supabase/.temp/
+node_modules/

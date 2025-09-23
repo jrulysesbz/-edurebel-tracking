@@ -1,0 +1,8 @@
+# (These exports are ONLY for this shell so you can test curl easily)
+export NEXT_PUBLIC_SUPABASE_URL=https://mtqqrccaukvhplftsbd1.supabase.co
+export NEXT_PUBLIC_SUPABASE_ANON_KEY=YOUR_FULL_ANON_KEY
+
+curl -s -i \
+  -H "apikey: $NEXT_PUBLIC_SUPABASE_ANON_KEY" \
+  -H "Authorization: Bearer $NEXT_PUBLIC_SUPABASE_ANON_KEY" \
+  "$NEXT_PUBLIC_SUPABASE_URL/rest/v1/students?select=id&limit=1"
