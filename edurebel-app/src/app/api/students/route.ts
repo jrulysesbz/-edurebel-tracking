@@ -1,58 +1,21 @@
-import { NextResponse } from 'next/server'
-import { supabaseAdmin } from '@/lib/supabaseAdmin'
+import { createClient } from '@supabase/supabase-js';
 
-export async function GET() {
-  const { data, error } = await supabaseAdmin
-    .from('students')
-    .select('id, first_name, last_name, class_id, school_id')
-    .order('last_name', { ascending: true })
-    .limit(200)
-  if (error) return NextResponse.json({ ok:false, error:error.message }, { status:500 })
-  return NextResponse.json({ ok:true, rows:data }, { status:200 })
-}
+export const runtime = 'nodejs';
 
-export async function POST(req: Request) {
+export async function GET(req: Request) {
   try {
-    const body = await req.json().catch(() => ({}))
-    const { first_name, last_name, class_id, school_id } = body || {}
-    if (!first_name || !last_name || !class_id || !school_id) {
-      return NextResponse.json({ ok:false, error:'Missing required fields' }, { status:400 })
-    }
-    const { data, error } = await supabaseAdmin
-      .from('students')
-      .insert([{ first_name, last_name, class_id, school_id }])
-      .select('id, first_name, last_name, class_id, school_id')
-      .single()
-    if (error) throw error
-    return NextResponse.json({ ok:true, student:data }, { status:201 })
-  } catch (e:any) {
-    return NextResponse.json({ ok:false, error:e?.message || String(e) }, { status:500 })
+    const auth = req.headers.get('authorization') ?? ''; // "Bearer <token>"
+    const supabase = createClient(
+      process.env.NEXT_PUBLIC_SUPABASE_URL!,
+      process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+      { global: { headers: { Authorization: auth } } }
+    );
+    const { data, error } = await supabase.from('students').select('*').limit(10);
+    if (error) throw error;
+    return Response.json({ data });
+  } catch (e: any) {
+    return new Response(JSON.stringify({ error: e.message ?? String(e) }), {
+      status: 500, headers: { 'content-type': 'application/json' },
+    });
   }
-}
-
-export async function PATCH(req: Request) {
-  try {
-    const body = await req.json().catch(() => ({}))
-    const { id, ...fields } = body || {}
-    if (!id) return NextResponse.json({ ok:false, error:'Missing id' }, { status:400 })
-    const { data, error } = await supabaseAdmin
-      .from('students')
-      .update(fields)
-      .eq('id', id)
-      .select('id, first_name, last_name, class_id, school_id')
-      .single()
-    if (error) throw error
-    return NextResponse.json({ ok:true, student:data }, { status:200 })
-  } catch (e:any) {
-    return NextResponse.json({ ok:false, error:e?.message || String(e) }, { status:500 })
-  }
-}
-
-export async function DELETE(req: Request) {
-  const { searchParams } = new URL(req.url)
-  const id = searchParams.get('id')
-  if (!id) return NextResponse.json({ ok:false, error:'Missing id' }, { status:400 })
-  const { error } = await supabaseAdmin.from('students').delete().eq('id', id)
-  if (error) return NextResponse.json({ ok:false, error:error.message }, { status:500 })
-  return NextResponse.json({ ok:true }, { status:200 })
 }
