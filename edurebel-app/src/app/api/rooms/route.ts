@@ -1,5 +1,4 @@
 import { createClient } from '@supabase/supabase-js';
-
 export const runtime = 'nodejs';
 
 export async function GET(req: Request) {
@@ -17,18 +16,14 @@ export async function GET(req: Request) {
 
     const { searchParams } = new URL(req.url);
     const limit = Math.min(parseInt(searchParams.get('limit') ?? '10', 10), 100);
-    const schoolId = searchParams.get('school_id') ?? undefined;
 
-    let query = supabase
-      .from('students')
-      .select('id,full_name,school_id,created_at')
+    const { data, error } = await supabase
+      .from('rooms')
+      .select('id,name,meeting_url,created_by')   // 👈 no created_at
+      .order('name', { ascending: true })
       .limit(limit);
 
-    if (schoolId) query = query.eq('school_id', schoolId);
-
-    const { data, error } = await query;
     if (error) throw error;
-
     return Response.json({ data });
   } catch (e: any) {
     return Response.json({ error: e.message ?? String(e) }, { status: 500 });
