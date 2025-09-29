@@ -1,36 +1,21 @@
-import { createClient } from '@supabase/supabase-js';
+import { headers } from 'next/headers'
+import { createClient } from '@supabase/supabase-js'
+export const runtime = 'nodejs'
 
-export const runtime = 'nodejs';
-
-export async function GET(req: Request) {
-  const auth = req.headers.get('authorization') ?? '';
-  if (!auth.toLowerCase().startsWith('bearer ')) {
-    return Response.json({ error: 'Missing Bearer token' }, { status: 401 });
-  }
-
+export async function GET() {
   try {
+    const h = await headers()
+    const auth = h.get('authorization') || ''
     const supabase = createClient(
       process.env.NEXT_PUBLIC_SUPABASE_URL!,
       process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
       { global: { headers: { Authorization: auth } } }
-    );
-
-    const { searchParams } = new URL(req.url);
-    const limit = Math.min(parseInt(searchParams.get('limit') ?? '10', 10), 100);
-    const schoolId = searchParams.get('school_id') ?? undefined;
-
-    let query = supabase
-      .from('students')
-      .select('id,full_name,school_id,created_at')
-      .limit(limit);
-
-    if (schoolId) query = query.eq('school_id', schoolId);
-
-    const { data, error } = await query;
-    if (error) throw error;
-
-    return Response.json({ data });
+    )
+    const { data, error } = await supabase.from('students').select('*').limit(10)
+    if (error) throw error
+    return new Response(JSON.stringify({ data }), { headers: { 'content-type': 'application/json' } })
   } catch (e: any) {
-    return Response.json({ error: e.message ?? String(e) }, { status: 500 });
+    console.error('GET /api/students failed:', e)
+    return new Response(JSON.stringify({ error: e.message ?? String(e) }), { status: 500 })
   }
 }
