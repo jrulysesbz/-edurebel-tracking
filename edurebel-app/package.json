@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "smoke": "APP=http://127.0.0.1:3001 bash scripts/smoke.sh"
+    "smoke": "APP=http://127.0.0.1:3000 bash scripts/smoke.sh"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.58.0",
