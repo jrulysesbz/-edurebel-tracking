@@ -63,7 +63,7 @@ export default function RoomsPage() {
       setRooms(list);
       if (!activeRoomId && list[0]?.id) setActiveRoomId(list[0].id);
     } catch (e: any) {
-      setErr(e.message ?? String(e));
+      setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setLoadingRooms(false);
     }
@@ -83,7 +83,7 @@ export default function RoomsPage() {
       if (!res.ok) throw new Error(json?.error || 'Failed to load messages');
       setMessages(json.data ?? []);
     } catch (e: any) {
-      setErr(e.message ?? String(e));
+      setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setLoadingMsgs(false);
     }
@@ -128,7 +128,7 @@ export default function RoomsPage() {
       // Pull latest after sending
       fetchMessages(activeRoomId);
     } catch (e: any) {
-      setErr(e.message ?? String(e));
+      setErr(e instanceof Error ? e.message : String(e));
     }
   };
 

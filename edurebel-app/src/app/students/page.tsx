@@ -60,7 +60,7 @@ export default function StudentsPage() {
       if (!schoolId && schJ.rows?.length) setSchoolId(schJ.rows[0].id)
       if (!classId && cJ.rows?.length) setClassId(cJ.rows[0].id)
     } catch (e : unknown) {
-      setErr(e?.message || String(e))
+      setErr(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
     }
