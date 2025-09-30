@@ -1,5 +1,4 @@
 // file: src/app/api/students/route.ts
-import { headers } from 'next/headers'
 import { createClient } from '@supabase/supabase-js'
 export const runtime = 'nodejs'
 
@@ -14,8 +13,8 @@ function sb(auth: string) {
   )
 }
 
-export async function GET() {
-  const auth = headers().get('authorization') ?? ''
+export async function GET(req: Request) {
+  const auth = req.headers.get('authorization') ?? ''
   const supabase = sb(auth)
   const { data, error } = await supabase
     .from('students')
@@ -27,7 +26,7 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    const auth = headers().get('authorization') ?? ''
+    const auth = req.headers.get('authorization') ?? ''
     const supabase = sb(auth)
 
     const { data: prof, error: profErr } = await supabase
