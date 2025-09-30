@@ -9,21 +9,15 @@ const MessageSchema = z.object({
 
 type MessageBody = z.infer<typeof MessageSchema>
 
-export async function POST(
-  req: Request,
-  { params }: { params: { id: string } }
-) {
+export async function POST(req: Request, { params }: { params: Record<string, string | string[]> }) {
   const body: MessageBody = MessageSchema.parse(await req.json())
-  const roomId = params.id
+  const roomId = (params.id as string)
   // TODO: persist { ...body, roomId }
   return NextResponse.json({ ok: true })
 }
 
-export async function GET(
-  _req: Request,
-  { params }: { params: { id: string } }
-) {
-  const roomId = params.id
+export async function GET(_req: Request, { params }: { params: Record<string, string | string[]> }) {
+  const roomId = (params.id as string)
   // TODO: fetch messages for roomId
   return NextResponse.json([])
 }
