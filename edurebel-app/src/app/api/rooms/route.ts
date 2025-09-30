@@ -25,7 +25,7 @@ export async function GET(req: Request) {
 
     if (error) throw error;
     return Response.json({ data });
-  } catch (e : unknown) {
-    return Response.json({ error: e.message ?? String(e) }, { status: 500 });
+  } catch (e) {
+    return Response.json({ error: (e instanceof Error ? e.message : String(e)) }, { status: 500 });
   }
 }
