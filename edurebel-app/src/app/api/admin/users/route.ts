@@ -1,5 +1,5 @@
 // file: src/app/api/admin/users/route.ts
-import { requireAdmin } from '../../../lib/admin-auth'
+import { requireAdmin } from "../../../../lib/admin-auth"
 
 export async function GET(req: Request) {
   const gate = requireAdmin(req)
