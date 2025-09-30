@@ -1,0 +1,81 @@
+name: Audit Students
+
+on:
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch: {}
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        school: [ DEMO ]  # add more e.g. [ DEMO, QA, PROD ]
+    env:
+      APP: http://127.0.0.1:3000
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_ANON_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_ANON_KEY }}
+      SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+      ADMIN_BEARER_TOKEN: ${{ secrets.ADMIN_BEARER_TOKEN }}
+      PATTERN: Seeded Student %
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - run: npm ci
+
+      - name: Write .env.local
+        run: |
+          cat > .env.local <<EOF
+          NEXT_PUBLIC_SUPABASE_URL=${NEXT_PUBLIC_SUPABASE_URL}
+          NEXT_PUBLIC_SUPABASE_ANON_KEY=${NEXT_PUBLIC_SUPABASE_ANON_KEY}
+          SUPABASE_SERVICE_ROLE=${SUPABASE_SERVICE_ROLE}
+          ADMIN_BEARER_TOKEN=${ADMIN_BEARER_TOKEN}
+          EOF
+
+      - run: npm run build
+
+      - name: Start Next
+        run: |
+          nohup npx next start -p 3000 > .next/ci.log 2>&1 &
+          echo $! > .next/ci.pid
+
+      - name: Wait for Next
+        run: bash scripts/ci-wait-for-next.sh "$APP/api/health" 60
+
+      - name: Doctor
+        run: APP="$APP" bash scripts/doctor.sh
+
+      # Hard-fail if seeded rows exist
+      - name: Audit (global)
+        run: make -s audit PATTERN="$PATTERN"
+
+      - name: Audit (since 24h)
+        run: make -s audit-since PATTERN="$PATTERN" HOURS=24
+
+      # Per-school scoped checks
+      - name: Audit-all (per school)
+        run: |
+          SCHOOL='${{ matrix.school }}' make -s audit PATTERN="$PATTERN"
+          SCHOOL='${{ matrix.school }}' make -s audit-since PATTERN="$PATTERN" HOURS=24
+          SCHOOL='${{ matrix.school }}' make -s seed-report-json PATTERN="$PATTERN" | tee "tmp/seed-report-${{ matrix.school }}.json"
+          SCHOOL='${{ matrix.school }}' make -s export-students PATTERN='%25' LIMIT=5 ORDER=created_at.desc OUT="tmp/students-sample-${{ matrix.school }}.csv"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: audit-artifacts-${{ matrix.school }}
+          path: |
+            .next/ci.log
+            tmp/seed-report-${{ matrix.school }}.json
+            tmp/students-sample-${{ matrix.school }}.csv
+          if-no-files-found: warn
+
+      - name: Stop Next
+        if: always()
+        run: '[ -f .next/ci.pid ] && kill $(cat .next/ci.pid) || true'
