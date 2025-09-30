@@ -22,6 +22,7 @@ export async function GET(req: Request) {
     if (error) throw error;
     return Response.json({ data });
   } catch (e) {
-    return (() => { const _m = (e instanceof Error) ? e.message : (typeof e === 'string' ? e : JSON.stringify(e)); return (() => { const e = (typeof _m  !== 'undefined' ? _m  : undefined) as unknown; const _m = e instanceof Error ? e.message : (typeof e === 'string' ? e : JSON.stringify(e)); return Response.json({ error: _m }, { status: 500 }); })(); })();
+    const msg = (e instanceof Error) ? e.message : (typeof e === 'string' ? e : JSON.stringify(e));
+    return Response.json({ error: msg }, { status: 500 }); })();
   }
 }
