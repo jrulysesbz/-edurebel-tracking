@@ -1,25 +1,29 @@
-import { NextResponse } from 'next/server';
-import { z } from 'zod';
+import { NextResponse } from 'next/server'
+import { z } from 'zod'
 
-const MessageBody = z.object({
+// Minimal body schema – expand as needed
+const MessageSchema = z.object({
   text: z.string().min(1),
-  authorId: z.string(),
-});
-type MessageBody = z.infer<typeof MessageBody>;
+  authorId: z.string().optional(),
+})
+
+type MessageBody = z.infer<typeof MessageSchema>
 
 export async function POST(
-  req: ctx: { params: { id: string } }
+  req: Request,
+  { params }: { params: { id: string } }
 ) {
-  const body = MessageBody.parse(await req.json());
-  const roomId = params.id;
-  // TODO: persist message { ...body, roomId }
-  return NextResponse.json({ ok: true });
+  const body: MessageBody = MessageSchema.parse(await req.json())
+  const roomId = params.id
+  // TODO: persist { ...body, roomId }
+  return NextResponse.json({ ok: true })
 }
 
 export async function GET(
-  _req: ctx: { params: { id: string } }
+  _req: Request,
+  { params }: { params: { id: string } }
 ) {
-  const roomId = params.id;
+  const roomId = params.id
   // TODO: fetch messages for roomId
-  return NextResponse.json([]);
+  return NextResponse.json([])
 }
