@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+set -euo pipefail
+. "$(dirname "$0")/.env-root.inc"
+. "$(dirname "$0")/.bash-urlencode.inc"
+
+APP="${APP:-http://127.0.0.1:3000}"
+PATTERN="${1:-}"
+OUT="${2:-tmp/students.csv}"
+
+# Optional filters (all default empty to avoid set -u crashes)
+FROM="${FROM:-}"
+TO="${TO:-}"
+LIMIT="${LIMIT:-}"
+ORDER="${ORDER:-}"
+SCHOOL="${SCHOOL:-}"
+SCHOOL_ID="${SCHOOL_ID:-}"
+
+die(){ printf "❌ %s\n" "$*" >&2; exit 1; }
+trim(){ sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//'; }
+
+ROOT="$(find_env_root)" || die ".env.local not found; set APP_DIR or run in repo"
+cd "$ROOT"
+
+TOKEN="$(grep -m1 -E '^ADMIN_BEARER_TOKEN=' .env.local | cut -d= -f2- | trim || true)"
+[ -n "$TOKEN" ] || die "ADMIN_BEARER_TOKEN missing in .env.local"
+[ -n "$PATTERN" ] || die "Pattern required, e.g. 'Seeded Student %'"
+
+APP="${APP%/}"
+PENC="$(urlencode "$PATTERN")"
+URL="$APP/api/admin/students/export?pattern=$PENC"
+[ -n "$FROM" ]      && URL="$URL&created_from=$(urlencode "$FROM")"
+[ -n "$TO" ]        && URL="$URL&created_to=$(urlencode "$TO")"
+[ -n "$LIMIT" ]     && URL="$URL&limit=$(urlencode "$LIMIT")"
+[ -n "$ORDER" ]     && URL="$URL&order=$(urlencode "$ORDER")"
+[ -n "$SCHOOL" ]    && URL="$URL&school=$(urlencode "$SCHOOL")"
+[ -n "$SCHOOL_ID" ] && URL="$URL&school_id=$(urlencode "$SCHOOL_ID")"
+
+mkdir -p "$(dirname "$OUT")"
+curl -sS "$URL" -H "Authorization: Bearer $TOKEN" -o "$OUT"
+echo "✅ Exported → $OUT"

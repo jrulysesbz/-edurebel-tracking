@@ -59,7 +59,7 @@ export default function StudentsPage() {
       setSchools(schJ.rows || [])
       if (!schoolId && schJ.rows?.length) setSchoolId(schJ.rows[0].id)
       if (!classId && cJ.rows?.length) setClassId(cJ.rows[0].id)
-    } catch (e:any) {
+    } catch (e : unknown) {
       setErr(e?.message || String(e))
     } finally {
       setLoading(false)
@@ -105,7 +105,7 @@ export default function StudentsPage() {
       return copy
     })
   }
-  function changeField(id: string, field: keyof Omit<Student,'id'>, value: any) {
+  function changeField(id: string, field: keyof Omit<Student,'id'>, value : unknown) {
     setEditing(prev => ({
       ...prev,
       [id]: { ...(prev[id]!), [field]: value, dirty: true }

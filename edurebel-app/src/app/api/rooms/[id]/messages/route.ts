@@ -22,7 +22,7 @@ export async function GET(req: Request, { params }: { params: { id: string } }) 
       .limit(limit);
     if (error) throw error;
     return Response.json({ data });
-  } catch (e: any) {
+  } catch (e : unknown) {
     return Response.json({ error: e.message ?? String(e) }, { status: 500 });
   }
 }
@@ -52,7 +52,7 @@ export async function POST(req: Request, { params }: { params: { id: string } })
       .single();
     if (error) throw error;
     return Response.json({ ok: true, id: data.id, inserted_at: data.inserted_at }, { status: 201 });
-  } catch (e: any) {
+  } catch (e : unknown) {
     return Response.json({ error: e.message ?? String(e) }, { status: 500 });
   }
 }

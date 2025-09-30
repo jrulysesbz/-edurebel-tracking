@@ -50,7 +50,7 @@ export async function POST(req: Request) {
 
     if (error) throw error
     return Response.json({ data }, { status: 201, headers: { 'content-type': 'application/json' } })
-  } catch (e: any) {
+  } catch (e : unknown) {
     return Response.json({ error: e?.message ?? String(e) }, { status: 500 })
   }
 }

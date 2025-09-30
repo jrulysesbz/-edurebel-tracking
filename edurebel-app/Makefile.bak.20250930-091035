@@ -1,0 +1,21 @@
+.PHONY: export-students export-students-all seed-report
+APP ?= http://127.0.0.1:3000
+PATTERN ?= Seeded Student %
+OUT ?= tmp/students.csv
+TS ?= $(shell date +%Y%m%d-%H%M%S)
+
+export-students:
+	@mkdir -p tmp
+	@APP="$(APP)" bash scripts/admin-export.sh "$(PATTERN)" "$(OUT)"
+export-students-all:
+	@mkdir -p tmp
+	@OUT="tmp/students-$(TS).csv"; echo "▶ Exporting to $$OUT (pattern: $(PATTERN))"
+	@APP="$(APP)" bash scripts/admin-export.sh "$(PATTERN)" "$$OUT"
+seed-report:
+	@echo "▶ Report (pattern: $(PATTERN))"
+	@APP="$(APP)" bash scripts/admin-report.sh '$(PATTERN)'
+
+.PHONY: export-students-open
+export-students-open:
+	@$(MAKE) export-students
+	@open "$(OUT)"

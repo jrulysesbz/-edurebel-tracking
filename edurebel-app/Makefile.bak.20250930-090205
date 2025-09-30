@@ -1,0 +1,24 @@
+.RECIPEPREFIX := >
+.PHONY: export-students export-students-all seed-report
+
+# Base app URL (override if needed)
+APP ?= http://127.0.0.1:3000
+
+# Export CSV (requires scripts/admin-export.sh)
+PATTERN ?= Seeded Student %
+OUT ?= tmp/students.csv
+export-students:
+> @mkdir -p tmp
+> @APP="$(APP)" bash scripts/admin-export.sh "$(PATTERN)" "$(OUT)"
+
+# Timestamped export
+TS ?= $(shell date +%Y%m%d-%H%M%S)
+export-students-all:
+> @mkdir -p tmp
+> @OUT="tmp/students-$(TS).csv"; echo "▶ Exporting to $$OUT (pattern: $(PATTERN))"
+> @APP="$(APP)" bash scripts/admin-export.sh "$(PATTERN)" "$$OUT"
+
+# Report counts (uses scripts/admin-report.sh)
+seed-report:
+> @echo "▶ Report (pattern: $(PATTERN))"
+> @APP="$(APP)" bash scripts/admin-report.sh '$(PATTERN)'
