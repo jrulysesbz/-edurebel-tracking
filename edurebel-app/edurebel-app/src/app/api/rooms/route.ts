@@ -1,44 +1,47 @@
-import { createClient } from '@supabase/supabase-js';
-export const runtime = 'nodejs';
+import { z } from 'zod'
+import { createSupabaseForRequest } from '@/lib/supabaseServer'
+
+const NewRoomSchema = z.object({
+  name: z.string().min(1).max(200),
+  school_id: z.string().uuid().optional(),
+  meeting_url: z.string().url().optional(),
+  created_by: z.string().uuid().optional(),
+})
 
 export async function GET(req: Request) {
-  const auth = req.headers.get('authorization') ?? '';
-  if (!auth.toLowerCase().startsWith('bearer ')) {
-    return Response.json({ error: 'Missing Bearer token' }, { status: 401 });
+  try {
+    const supabase = createSupabaseForRequest(req)
+    const { data, error } = await supabase
+      .from('rooms')
+      .select('id,name,school_id,meeting_url,created_by,inserted_at')
+      .order('inserted_at', { ascending: false })
+    if (error) throw error
+    return Response.json({ data })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : (typeof e === 'string' ? e : JSON.stringify(e))
+    return Response.json({ error: msg }, { status: 500 })
   }
-  const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { global: { headers: { Authorization: auth } } });
-  const { data, error } = await supabase
-    .from('rooms')
-    .select('id,name,school_id,meeting_url,created_at')
-    .order('created_at', { ascending: false })
-    .limit(50);
-  if (error) return Response.json({ error: error.message }, { status: 500 });
-  return Response.json({ data });
 }
 
 export async function POST(req: Request) {
-  const auth = req.headers.get('authorization') ?? '';
-  if (!auth.toLowerCase().startsWith('bearer ')) {
-    return Response.json({ error: 'Missing Bearer token' }, { status: 401 });
+  try {
+    const supabase = createSupabaseForRequest(req)
+    const input = NewRoomSchema.parse(await req.json())
+
+    const insert: Record<string, unknown> = { name: input.name }
+    if (input.school_id) insert.school_id = input.school_id
+    if (input.meeting_url) insert.meeting_url = input.meeting_url
+    if (input.created_by) insert.created_by = input.created_by
+
+    const { data, error } = await supabase
+      .from('rooms')
+      .insert(insert)
+      .select('id,name,school_id,meeting_url,created_by,inserted_at')
+      .single()
+    if (error) throw error
+    return Response.json({ data }, { status: 201 })
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : (typeof e === 'string' ? e : JSON.stringify(e))
+    return Response.json({ error: msg }, { status: 400 })
   }
-  const body = await req.json().catch(() => ({}));
-  const { school_id, name, meeting_url } = body ?? {};
-  if (!school_id || !name) return Response.json({ error: 'school_id and name required' }, { status: 400 });
-
-  const supabase = createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!, { global: { headers: { Authorization: auth } } });
-
-  // whoami via profiles
-  const { data: me } = await supabase.from('profiles').select('user_id').eq('user_id', (await (async()=>{const jwt=auth.split(' ')[1]; try{const p=JSON.parse(Buffer.from(jwt.split('.')[1], 'base64').toString()); return p.sub;}catch{return '';}})())).single();
-
-  const { data, error } = await supabase.from('rooms').insert({
-    school_id, name, meeting_url: meeting_url ?? null, created_by: me?.user_id ?? null
-  }).select('id').single();
-
-  if (error) return Response.json({ error: error.message }, { status: 500 });
-
-  // auto-add creator as owner member (best-effort)
-  if (data?.id && me?.user_id) {
-    await supabase.from('room_members').insert({ room_id: data.id, user_id: me.user_id, role: 'owner' });
-  }
-  return Response.json({ id: data?.id });
 }

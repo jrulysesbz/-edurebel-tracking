@@ -62,7 +62,7 @@ export default function RoomsPage() {
       const list: Room[] = json.data ?? [];
       setRooms(list);
       if (!activeRoomId && list[0]?.id) setActiveRoomId(list[0].id);
-    } catch (e: any) {
+    } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setLoadingRooms(false);
@@ -82,7 +82,7 @@ export default function RoomsPage() {
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'Failed to load messages');
       setMessages(json.data ?? []);
-    } catch (e: any) {
+    } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : String(e));
     } finally {
       setLoadingMsgs(false);
@@ -127,7 +127,7 @@ export default function RoomsPage() {
       setText('');
       // Pull latest after sending
       fetchMessages(activeRoomId);
-    } catch (e: any) {
+    } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : String(e));
     }
   };
@@ -262,3 +262,4 @@ export default function RoomsPage() {
     </div>
   );
 }
+// …paste TS/JS code here…
