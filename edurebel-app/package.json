@@ -8,7 +8,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "smoke": "APP=http://127.0.0.1:3000 bash scripts/smoke.sh"
+    "smoke": "HEALTH_PATH=/api/health ALLOW_401=0 KEEP_ALIVE=1 bash scripts/dev-smoke.sh --reuse"
   },
   "dependencies": {
     "@supabase/supabase-js": "^2.58.0",
