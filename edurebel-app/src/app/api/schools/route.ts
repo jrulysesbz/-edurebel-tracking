@@ -1,5 +1,4 @@
 import { createSupabaseForRequest } from '@/lib/supabaseServer';
-
 export async function GET(req: Request) {
   try {
     const supabase = createSupabaseForRequest(req);
@@ -10,7 +9,7 @@ export async function GET(req: Request) {
     if (error) throw error;
     return Response.json({ data });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : (typeof e === 'string' ? e : JSON.stringify(e));
+    const msg = e instanceof Error ? e.message : String(e);
     return Response.json({ error: msg }, { status: 500 });
   }
 }
