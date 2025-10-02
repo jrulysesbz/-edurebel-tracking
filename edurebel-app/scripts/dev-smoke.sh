@@ -1,33 +1,15 @@
 #!/usr/bin/env bash
 set -euo pipefail
-
 APP_DIR="${APP_DIR:-${HOME}/edurebel-tracking/edurebel-app}"
 APP_PORT="${APP_PORT:-3000}"
 NEXT_START_CMD="${NEXT_START_CMD:-npm run dev}"
 WAIT_TIMEOUT_SEC="${WAIT_TIMEOUT_SEC:-60}"
 HEALTH_PATH="${HEALTH_PATH:-/api/health}"
-
 PATCH_ROUTES="${PATCH_ROUTES:-1}"
 KILL_OCCUPANTS="${KILL_OCCUPANTS:-1}"
 REUSE_RUNNING="${REUSE_RUNNING:-0}"
 ALLOW_401="${ALLOW_401:-0}"
-KEEP_ALIVE="${KEEP_ALIVE:-0}"
-
-usage(){ cat <<EOF
-Usage: $(basename "$0") [--reuse] [--keep] [--timeout SEC] [--no-kill]
-EOF
-}
-
-while [[ $# -gt 0 ]]; do
-  case "$1" in
-    --reuse) REUSE_RUNNING=1; shift;;
-    --keep) KEEP_ALIVE=1; shift;;
-    --timeout) WAIT_TIMEOUT_SEC="$2"; shift 2;;
-    --no-kill) KILL_OCCUPANTS=0; shift;;
-    -h|--help) usage; exit 0;;
-    *) echo "Unknown arg: $1"; usage; exit 2;;
-  esac
-done
+KEEP_ALIVE="${KEEP_ALIVE:-1}"
 
 ts(){ date +"%H:%M:%S"; }
 log(){ printf "[%s] %s\n" "$(ts)" "$*"; }
@@ -130,22 +112,16 @@ fi
 [[ -n "${SCHOOL_ID:-}" ]] || die "Could not obtain SCHOOL_ID"
 ok "Using SCHOOL_ID=$SCHOOL_ID"
 
-# Idempotent ensure of "General"
 info "Ensuring room 'General' exists…"
 ROOMS_FOR_SCHOOL="$(http -H "Authorization: Bearer ${ADMIN_TOKEN}" "http://localhost:${APP_PORT}/api/rooms?school_id=${SCHOOL_ID}&name=General" || true)"
 EXISTING_ID="$(printf "%s" "$ROOMS_FOR_SCHOOL" | jq -r '.data[]? | select((.name|ascii_downcase)=="general" and .school_id=="'"$SCHOOL_ID"'") | .id' | head -n1)"
-
 if [[ -n "${EXISTING_ID:-}" ]]; then
   ok "Room 'General' already exists (id=${EXISTING_ID})"
 else
   ROOM_PAYLOAD="$(jq -n --arg name "General" --arg sid "$SCHOOL_ID" '{name:$name, school_id:$sid}')"
   printf "%s\n" "$ROOM_PAYLOAD" | jq_or_cat
-  ROOM_CREATE="$(
-    http -H "Authorization: Bearer ${ADMIN_TOKEN}" -H "Content-Type: application/json" \
-      -X POST "http://localhost:${APP_PORT}/api/rooms" --data-binary "$ROOM_PAYLOAD" \
-    || true
-  )"
-  # Treat unique-violation as OK (API should already be idempotent; this is extra safety)
+  ROOM_CREATE="$(http -H "Authorization: Bearer ${ADMIN_TOKEN}" -H "Content-Type: application/json" \
+    -X POST "http://localhost:${APP_PORT}/api/rooms" --data-binary "$ROOM_PAYLOAD" || true)"
   if printf "%s" "$ROOM_CREATE" | jq -e '.error | fromjson? | .code == "23505"' >/dev/null 2>&1; then
     ok "Room 'General' already existed (conflict handled)."
   else

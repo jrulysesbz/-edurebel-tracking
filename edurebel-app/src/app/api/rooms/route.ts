@@ -13,15 +13,15 @@ export async function GET(req: NextRequest) {
     const schoolId = url.searchParams.get('school_id') ?? undefined;
     const name = url.searchParams.get('name') ?? undefined;
 
-    let query = supabase
+    let q = supabase
       .from('rooms')
       .select('id,name,school_id,meeting_url,created_by,inserted_at')
       .order('inserted_at', { ascending: false });
 
-    if (schoolId) query = query.eq('school_id', schoolId);
-    if (name) query = query.ilike('name', name);
+    if (schoolId) q = q.eq('school_id', schoolId);
+    if (name) q = q.ilike('name', name);
 
-    const { data, error } = await query;
+    const { data, error } = await q;
     if (error) throw error;
     return Response.json({ data });
   } catch (e) {
@@ -38,7 +38,6 @@ export async function POST(req: NextRequest) {
     const school_id: string | undefined = body?.school_id;
     if (!name || !school_id) return bad('name and school_id are required');
 
-    // Try insert (happy path)
     const { data, error } = await supabase
       .from('rooms')
       .insert([{ name, school_id }])
@@ -47,7 +46,6 @@ export async function POST(req: NextRequest) {
 
     if (!error) return Response.json({ data });
 
-    // Conflict -> return existing row (idempotent)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const pgCode = (error as any)?.code ?? '';
     if (pgCode === '23505') {
