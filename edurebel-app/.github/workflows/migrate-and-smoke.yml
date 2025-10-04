@@ -1,0 +1,43 @@
+name: Migrate and Smoke
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+jobs:
+  migrate-and-smoke:
+    runs-on: ubuntu-latest
+    env:
+      ADMIN_BEARER_TOKEN: ${{ secrets.ADMIN_BEARER_TOKEN }}
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      SUPABASE_SERVICE_ROLE: ${{ secrets.SUPABASE_SERVICE_ROLE }}
+      SUPABASE_PROJECT_REF: ${{ secrets.SUPABASE_PROJECT_REF }}
+      SUPABASE_DB_PASSWORD:  ${{ secrets.SUPABASE_DB_PASSWORD }}
+      PORT: 3000
+      BASE_URL: http://localhost:3000
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+      - run: npm ci
+      - name: Install Supabase CLI
+        run: |
+          curl -sL https://github.com/supabase/cli/releases/download/v2.47.2/supabase_2.47.2_linux_amd64.deb -o supabase.deb
+          sudo dpkg -i supabase.deb
+          supabase --version
+      - name: Link Supabase project
+        if: ${{ env.SUPABASE_PROJECT_REF != '' && env.SUPABASE_DB_PASSWORD != '' }}
+        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
+      - name: Push migrations
+        if: ${{ env.SUPABASE_PROJECT_REF != '' && env.SUPABASE_DB_PASSWORD != '' }}
+        run: supabase db push
+      - run: npm run ci:build
+      - run: nohup bash -lc "npm run ci:start" >/tmp/app.log 2>&1 & echo $! > /tmp/app.pid
+      - run: ./scripts/wait-on.sh "$BASE_URL/api/health" 90
+      - if: always()
+        run: tail -n +1 /tmp/app.log || true
+      - run: npx playwright install --with-deps
+      - run: npm run test:e2e
+      - if: always()
+        run: kill "$(cat /tmp/app.pid)" 2>/dev/null || true
