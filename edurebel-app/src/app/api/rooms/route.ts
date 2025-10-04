@@ -18,7 +18,7 @@ export async function GET(req: NextRequest) {
       .order('inserted_at', { ascending: false });
 
     if (schoolId) q = q.eq('school_id', schoolId);
-    if (name) q = q.ilike('name', name); // case-insensitive
+    if (name) q = q.ilike('name', name); // why: case-insensitive
 
     const { data, error } = await q;
     if (error) throw error;
@@ -37,7 +37,7 @@ export async function POST(req: NextRequest) {
     const school_id: string | undefined = body?.school_id;
     if (!name || !school_id) return bad('name and school_id are required');
 
-    // 1) Try insert
+    // 1) Try insert (works pre/post migration)
     const { data: created, error: insertErr } = await supabase
       .from('rooms')
       .insert([{ name, school_id }])
