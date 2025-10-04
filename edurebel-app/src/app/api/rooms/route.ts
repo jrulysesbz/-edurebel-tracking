@@ -1,4 +1,3 @@
-// src/app/api/rooms/route.ts
 import { NextRequest } from 'next/server';
 import { createSupabaseForRequest } from '@/lib/supabaseServer';
 
@@ -19,14 +18,13 @@ export async function GET(req: NextRequest) {
       .order('inserted_at', { ascending: false });
 
     if (schoolId) q = q.eq('school_id', schoolId);
-    if (name) q = q.ilike('name', name);
+    if (name) q = q.ilike('name', name); // case-insensitive
 
     const { data, error } = await q;
     if (error) throw error;
     return Response.json({ data });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return bad(msg, 500);
+    return bad(e instanceof Error ? e.message : String(e), 500);
   }
 }
 
@@ -38,32 +36,27 @@ export async function POST(req: NextRequest) {
     const school_id: string | undefined = body?.school_id;
     if (!name || !school_id) return bad('name and school_id are required');
 
-    const { data, error } = await supabase
+    // Single-call idempotency (requires unique index on (school_id, name_ci))
+    const { error: upsertErr } = await supabase
       .from('rooms')
-      .insert([{ name, school_id }])
+      .upsert(
+        [{ name, school_id }],
+        { onConflict: 'school_id,name_ci', ignoreDuplicates: true }
+      );
+    if (upsertErr) throw upsertErr;
+
+    // Return the row (works for both insert & duplicate)
+    const { data, error: selErr } = await supabase
+      .from('rooms')
       .select('id,name,school_id,meeting_url,created_by,inserted_at')
+      .eq('school_id', school_id)
+      .ilike('name', name)
+      .limit(1)
       .single();
+    if (selErr) throw selErr;
 
-    if (!error) return Response.json({ data });
-
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const pgCode = (error as any)?.code ?? '';
-    if (pgCode === '23505') {
-      const { data: existing, error: selErr } = await supabase
-        .from('rooms')
-        .select('id,name,school_id,meeting_url,created_by,inserted_at')
-        .eq('school_id', school_id)
-        .ilike('name', name)
-        .order('inserted_at', { ascending: false })
-        .limit(1)
-        .single();
-      if (selErr) throw selErr;
-      return Response.json({ data: existing, meta: { conflict: true } });
-    }
-
-    return bad(typeof error === 'object' ? JSON.stringify(error) : String(error), 400);
+    return Response.json({ data, meta: { conflict: true } });
   } catch (e) {
-    const msg = e instanceof Error ? e.message : String(e);
-    return bad(msg, 500);
+    return bad(e instanceof Error ? e.message : String(e), 500);
   }
 }
