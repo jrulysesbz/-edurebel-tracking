@@ -37,34 +37,16 @@ export async function POST(req: NextRequest) {
     const school_id: string | undefined = body?.school_id;
     if (!name || !school_id) return bad('name and school_id are required');
 
-    // 1) Try insert (works pre/post migration)
-    const { data: created, error: insertErr } = await supabase
+    // Single-call idempotency via UPSERT (requires unique index on school_id,name_ci or school_id,lower(name))
+    const { data: upserted, error: upsertErr } = await supabase
       .from('rooms')
-      .insert([{ name, school_id }])
+      .upsert([{ name, school_id }], { onConflict: 'school_id,name_ci' })
       .select('id,name,school_id,meeting_url,created_by,inserted_at')
+      .order('inserted_at', { ascending: false })
+      .limit(1)
       .single();
-
-    if (!insertErr) {
-      return Response.json({ data: created, meta: { created: true } });
-    }
-
-    // 2) Unique violation → fetch existing (idempotent)
-    const pgCode = (insertErr as unknown as { code?: string })?.code ?? '';
-    if (pgCode === '23505') {
-      const { data: existing, error: selErr } = await supabase
-        .from('rooms')
-        .select('id,name,school_id,meeting_url,created_by,inserted_at')
-        .eq('school_id', school_id)
-        .ilike('name', name)
-        .order('inserted_at', { ascending: false })
-        .limit(1)
-        .single();
-      if (selErr) throw selErr;
-      return Response.json({ data: existing, meta: { conflict: true } });
-    }
-
-    // 3) Other errors → surface clearly
-    return bad(typeof insertErr === 'object' ? JSON.stringify(insertErr) : String(insertErr), 500);
+    if (upsertErr) return bad(typeof upsertErr === 'object' ? JSON.stringify(upsertErr) : String(upsertErr), 500);
+    return Response.json({ data: upserted, meta: { upsert: true } });
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return bad(msg, 500);
