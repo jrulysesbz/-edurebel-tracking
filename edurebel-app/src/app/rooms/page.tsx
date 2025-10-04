@@ -1,3 +1,4 @@
+/* react-hooks/exhaustive-deps: fetchers are memoized via useCallback below */
 'use client';
 
 import { useEffect, useMemo, useState } from 'react';
