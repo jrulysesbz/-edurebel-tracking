@@ -37,23 +37,21 @@ export async function POST(req: NextRequest) {
     const school_id: string | undefined = body?.school_id;
     if (!name || !school_id) return bad('name and school_id are required');
 
-    // Works both before and after DB migration:
-    // 1) Try plain insert.
-    const ins = await supabase
+    // 1) Try insert
+    const { data: created, error: insertErr } = await supabase
       .from('rooms')
       .insert([{ name, school_id }])
       .select('id,name,school_id,meeting_url,created_by,inserted_at')
       .single();
 
-    if (!ins.error) {
-      return Response.json({ data: ins.data, meta: { created: true } });
+    if (!insertErr) {
+      return Response.json({ data: created, meta: { created: true } });
     }
 
-    // 2) If unique violation, fetch existing (idempotent).
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const code = (ins.error as any)?.code ?? '';
-    if (code === '23505') {
-      const sel = await supabase
+    // 2) Unique violation → fetch existing (idempotent)
+    const pgCode = (insertErr as unknown as { code?: string })?.code ?? '';
+    if (pgCode === '23505') {
+      const { data: existing, error: selErr } = await supabase
         .from('rooms')
         .select('id,name,school_id,meeting_url,created_by,inserted_at')
         .eq('school_id', school_id)
@@ -61,12 +59,12 @@ export async function POST(req: NextRequest) {
         .order('inserted_at', { ascending: false })
         .limit(1)
         .single();
-      if (sel.error) throw sel.error;
-      return Response.json({ data: sel.data, meta: { conflict: true } });
+      if (selErr) throw selErr;
+      return Response.json({ data: existing, meta: { conflict: true } });
     }
 
-    // 3) Other errors → surface clearly.
-    return bad(typeof ins.error === 'object' ? JSON.stringify(ins.error) : String(ins.error), 500);
+    // 3) Other errors → surface clearly
+    return bad(typeof insertErr === 'object' ? JSON.stringify(insertErr) : String(insertErr), 500);
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
     return bad(msg, 500);
