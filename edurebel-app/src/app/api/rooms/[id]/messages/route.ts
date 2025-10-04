@@ -15,7 +15,7 @@ function extractRoomId(url: string): string {
 }
 
 export async function POST(req: Request) {
-  const _body: MessageBody = MessageSchema.parse(await req.json())
+  const _body : MessageBody = MessageSchema.parse(await req.json())
   const _roomId = extractRoomId(req.url)
   // TODO: persist { ...body, roomId }
   return NextResponse.json({ ok: true })

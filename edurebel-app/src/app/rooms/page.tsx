@@ -49,7 +49,7 @@ export default function RoomsPage() {
   };
 
   // Fetch rooms
-  const fetchRooms = async () => {
+  const fetchRooms = useCallback(async () => {
     if (!token) return;
     setLoadingRooms(true);
     setErr(null);
@@ -57,7 +57,7 @@ export default function RoomsPage() {
       const res = await fetch('/api/rooms', {
         headers: { authorization: `Bearer ${token}` },
         cache: 'no-store',
-      });
+      }, []);
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'Failed to load rooms');
       const list: Room[] = json.data ?? [];
@@ -71,7 +71,7 @@ export default function RoomsPage() {
   };
 
   // Fetch messages for active room
-  const fetchMessages = async (roomId: string) => {
+  const fetchMessages = useCallback(async (roomId: string) => {
     if (!token || !roomId) return;
     setLoadingMsgs(true);
     setErr(null);
@@ -79,7 +79,7 @@ export default function RoomsPage() {
       const res = await fetch(`/api/rooms/${roomId}/messages?limit=20`, {
         headers: { authorization: `Bearer ${token}` },
         cache: 'no-store',
-      });
+      }, []);
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'Failed to load messages');
       setMessages(json.data ?? []);
@@ -121,8 +121,8 @@ export default function RoomsPage() {
           authorization: `Bearer ${token}`,
           'content-type': 'application/json',
         },
-        body: JSON.stringify({ content: text }),
-      });
+        body: JSON.stringify({ content: text }, [fetchRooms]),
+      }, [fetchMessages]);
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'Failed to send');
       setText('');

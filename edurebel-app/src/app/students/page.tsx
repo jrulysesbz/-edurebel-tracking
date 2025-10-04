@@ -65,7 +65,7 @@ export default function StudentsPage() {
       setLoading(false)
     }
   }
-  useEffect(() => { loadAll() }, [])
+  useEffect(() => { loadAll() }, [loadAll])
 
   async function onCreate(e: React.FormEvent) {
     e.preventDefault()
@@ -78,7 +78,7 @@ export default function StudentsPage() {
         last_name:  lastName.trim(),
         class_id:   classId || null,
         school_id:  schoolId || null,
-      }),
+      }, [loadAll]),
     })
     const j = await res.json()
     if (!j.ok) { setErr(j.error || 'Create failed'); return }
