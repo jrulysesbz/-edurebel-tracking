@@ -1,7 +1,7 @@
 /* react-hooks/exhaustive-deps: fetchers are memoized via useCallback below */
 'use client';
 
-import { useEffect, useMemo, useState, useCallback } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { supabaseBrowser } from '@/lib/supabaseBrowser';
 
 type Room = { id: string; name: string; meeting_url: string | null; created_by: string | null };
@@ -57,7 +57,7 @@ export default function RoomsPage() {
       const res = await fetch('/api/rooms', {
         headers: { authorization: `Bearer ${token}` },
         cache: 'no-store',
-      });
+      }, []);
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'Failed to load rooms');
       const list: Room[] = json.data ?? [];
@@ -68,7 +68,7 @@ export default function RoomsPage() {
     } finally {
       setLoadingRooms(false);
     }
-  }, [token, activeRoomId]);
+  };
 
   // Fetch messages for active room
   const fetchMessages = useCallback(async (roomId: string) => {
@@ -79,7 +79,7 @@ export default function RoomsPage() {
       const res = await fetch(`/api/rooms/${roomId}/messages?limit=20`, {
         headers: { authorization: `Bearer ${token}` },
         cache: 'no-store',
-      });
+      }, []);
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'Failed to load messages');
       setMessages(json.data ?? []);
@@ -88,23 +88,23 @@ export default function RoomsPage() {
     } finally {
       setLoadingMsgs(false);
     }
-  }, [token]);
+  };
 
   // Initial loads
   useEffect(() => {
     if (token) fetchRooms();
-  }, [token, fetchRooms]);
+  }, [token]);
 
   useEffect(() => {
     if (token && activeRoomId) fetchMessages(activeRoomId);
-  }, [token, activeRoomId, fetchMessages]);
+  }, [token, activeRoomId]);
 
   // Lightweight polling for new messages
   useEffect(() => {
     if (!token || !activeRoomId) return;
     const id = setInterval(() => fetchMessages(activeRoomId), 3000);
     return () => clearInterval(id);
-  }, [token, activeRoomId, fetchMessages]);
+  }, [token, activeRoomId]);
 
   const activeRoom = useMemo(
     () => rooms.find(r => r.id === activeRoomId) ?? null,
@@ -115,21 +115,19 @@ export default function RoomsPage() {
     if (!token || !activeRoomId || !text.trim()) return;
     setErr(null);
     try {
-      // send message to current room
       const res = await fetch(`/api/rooms/${activeRoomId}/messages`, {
         method: 'POST',
         headers: {
-          'content-type': 'application/json',
           authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
         },
-        body: JSON.stringify({ content: text }),
-      });
-
+        body: JSON.stringify({ content: text }, [fetchRooms]),
+      }, [fetchMessages]);
       const json = await res.json();
       if (!res.ok) throw new Error(json?.error || 'Failed to send');
-
-      // refresh UI after sending
-      await fetchMessages(activeRoomId);
+      setText('');
+      // Pull latest after sending
+      fetchMessages(activeRoomId);
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : String(e));
     }
