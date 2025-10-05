@@ -1,97 +1,72 @@
 name: Migrate and Smoke
 
 on:
+  workflow_dispatch:
   push:
     branches: [ main ]
-  workflow_dispatch:
-    inputs:
-      ref:
-        description: "Ref (branch/tag) to checkout"
-        required: false
-        default: "main"
 
 jobs:
   migrate-and-smoke:
     runs-on: ubuntu-latest
-    # All shell steps run from the app folder so npm lockfile is found
     defaults:
       run:
-        shell: bash
         working-directory: edurebel-app
+
     env:
       NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
-      SUPABASE_DB_PASSWORD:     ${{ secrets.SUPABASE_DB_PASSWORD }}
-      ADMIN_BEARER_TOKEN:       ${{ secrets.ADMIN_BEARER_TOKEN }}
-      SUPABASE_DB_URL:          ${{ secrets.SUPABASE_DB_URL }}
-      PORT:                     3000
-      BASE_URL:                 http://localhost:3000
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ inputs.ref || github.ref_name }}
+      ADMIN_BEARER_TOKEN: ${{ secrets.ADMIN_BEARER_TOKEN }}
+      SUPABASE_DB_URL: ${{ secrets.SUPABASE_DB_URL }}
+      PORT: 3000
+      BASE_URL: http://localhost:3000
 
-      - name: Setup Node
-        uses: actions/setup-node@v4
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
         with:
-          node-version: '20'
-          cache: 'npm'
+          node-version: 20
+          cache: npm
           cache-dependency-path: edurebel-app/package-lock.json
 
       - name: Install deps
         run: npm ci
 
-      - name: Install Supabase CLI
+      # --- Install Supabase CLI without touching cli.supabase.com ---
+      - name: Install Supabase CLI (action)
+        id: supa
+        continue-on-error: true
+        uses: supabase/setup-cli@v1
+        with:
+          version: latest
+
+      - name: Install Supabase CLI (GitHub Releases fallback)
+        if: steps.supa.outcome != 'success'
         run: |
-          curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash - >/dev/null
-          curl -fsSL https://cli.supabase.com/linux_amd64/supabase -o /usr/local/bin/supabase
-          chmod +x /usr/local/bin/supabase
+          set -euo pipefail
+          curl -L https://github.com/supabase/cli/releases/latest/download/supabase_linux_amd64 -o supabase
+          sudo install -m 0755 supabase /usr/local/bin/supabase
           supabase --version
 
-      - name: Derive project ref from NEXT_PUBLIC_SUPABASE_URL
-        id: derive
+      # --- Push migrations using DB URL (no supabase link/config.toml needed) ---
+      - name: Push migrations (via DB URL)
         run: |
-          if [[ -z "${NEXT_PUBLIC_SUPABASE_URL:-}" ]]; then
-            echo "NEXT_PUBLIC_SUPABASE_URL missing"; exit 1
+          if [ -z "${SUPABASE_DB_URL:-}" ]; then
+            echo "❌ SUPABASE_DB_URL secret missing."
+            exit 1
           fi
-          REF="$(node -e "console.log(new URL(process.env.NEXT_PUBLIC_SUPABASE_URL).host.split('.')[0])")"
-          echo "SUPABASE_PROJECT_REF=$REF" >> "$GITHUB_ENV"
-          echo "Project ref: $REF"
-
-      - name: Link Supabase project (best path)
-        continue-on-error: true
-        run: |
-          supabase link \
-            --project-ref "$SUPABASE_PROJECT_REF" \
-            --password    "$SUPABASE_DB_PASSWORD" \
-            --workdir     "$PWD" \
-          && ls -la supabase/config.toml
-
-      - name: Push migrations (via link)
-        id: push_link
-        continue-on-error: true
-        run: |
-          supabase db push --workdir "$PWD"
-
-      - name: Push migrations (fallback via DB URL)
-        if: steps.push_link.outcome != 'success'
-        run: |
-          if [[ -z "${SUPABASE_DB_URL:-}" ]]; then
-            echo "No SUPABASE_DB_URL secret provided for fallback"; exit 1
-          fi
-          supabase db push --db-url "$SUPABASE_DB_URL" --workdir "$PWD"
+          supabase db push --db-url "$SUPABASE_DB_URL"
 
       - name: Build
-        run: npm run ci:build || npm run build
+        run: npm run ci:build
 
       - name: Start app (background)
         run: nohup bash -lc "npm run ci:start" >/tmp/app.log 2>&1 & echo $! > /tmp/app.pid
 
       - name: Wait for health
-        run: ../scripts/wait-on.sh "$BASE_URL/api/health" 90
+        run: ./scripts/wait-on.sh "$BASE_URL/api/health" 90
 
       - name: Show app log head
-        if: failure()
+        if: always()
         run: head -n 200 /tmp/app.log || true
 
       - name: Install Playwright
