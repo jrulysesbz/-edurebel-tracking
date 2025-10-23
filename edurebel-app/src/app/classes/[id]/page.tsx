@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { env } from '../../../lib/env';
 import RiskPanel from '../../../components/RiskPanel';
+import ReportButton from '../../../components/ReportButton';
 
 type ClassRow = { id: string; name: string };
 type StudentRow = { id: string; first_name: string | null; last_name: string | null; class_id: string | null };
@@ -44,6 +45,7 @@ export default async function ClassDetail({ params }: { params: Promise<{ id: st
             const name = `${s.first_name ?? ''} ${s.last_name ?? ''}`.trim() || s.id;
             return (
               <li key={s.id} className="border rounded-xl p-3">
+        <ReportButton studentId={s.id} />
                 <Link href={`/students/${s.id}`} className="hover:underline">{name}</Link>
               </li>
             );
