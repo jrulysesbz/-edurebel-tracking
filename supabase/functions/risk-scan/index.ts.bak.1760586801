@@ -6,10 +6,6 @@ const ANON_KEY     = Deno.env.get("SB_ANON_KEY") ?? Deno.env.get("SUPABASE_ANON_
 const SERVICE_KEY  = Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
 const ADMIN_TOKEN  = Deno.env.get("ADMIN_BEARER_TOKEN") ?? "";
 
-function isBypass(h: string | null): boolean {
-  return !!h && (h === `Bearer ${SERVICE_KEY}` || (ADMIN_TOKEN && h === `Bearer ${ADMIN_TOKEN}`));
-}
-
 Deno.serve(async (req) => {
   try {
     const url = new URL(req.url);
@@ -17,18 +13,16 @@ Deno.serve(async (req) => {
     const body = req.method === "POST" ? await req.json().catch(() => ({})) : {};
     const limit_n = Number(body?.limit_n ?? qLimit ?? 10) || 10;
 
-    const authHeader = req.headers.get("Authorization");
+    const authHeader = req.headers.get("Authorization") ?? "";
     if (!authHeader) return new Response(JSON.stringify({ error: "Missing Authorization Bearer token" }), { status: 401 });
 
-    if (isBypass(authHeader)) {
-      // Service/Admin: read MV directly (no RLS)
+    // Admin test bypass: if header matches ADMIN_TOKEN, query MV directly with service role (no RLS)
+    if (ADMIN_TOKEN && authHeader === `Bearer ${ADMIN_TOKEN}`) {
       const svc = createClient(SUPABASE_URL, SERVICE_KEY);
-      const { data, error } = await svc
-        .from("v_student_risk_mv")
-        .select("*")
-        .order("recent_incidents", { ascending: false })
-        .order("low_participation", { ascending: false })
-        .order("recent_stars", { ascending: true })
+      const { data, error } = await svc.from("v_student_risk_mv").select("*")
+        .order("recent_incidents", { ascending: false, nullsFirst: false })
+        .order("low_participation", { ascending: false, nullsFirst: false })
+        .order("recent_stars", { ascending: true, nullsFirst: false })
         .order("student_name", { ascending: true })
         .limit(limit_n);
       if (error) throw error;
@@ -37,7 +31,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Normal path: RLS-aware RPC
+    // Normal path: user-scoped RPC (RLS)
     const user = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: authHeader } } });
     const { data, error } = await user.rpc("risk_scan", { limit_n });
     if (error) throw error;

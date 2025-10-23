@@ -1,0 +1,40 @@
+// deno-lint-ignore-file no-explicit-any
+import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.4";
+
+const SUPABASE_URL = Deno.env.get("SB_URL") ?? Deno.env.get("SUPABASE_URL")!;
+const ANON_KEY     = Deno.env.get("SB_ANON_KEY") ?? Deno.env.get("SUPABASE_ANON_KEY")!;
+const SERVICE_KEY  = Deno.env.get("SERVICE_ROLE_KEY") ?? Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
+
+type Body = { student_id: string; week_start?: string };
+
+Deno.serve(async (req) => {
+  try {
+    if (req.method !== "POST") return new Response(JSON.stringify({ error: "POST required" }), { status: 405 });
+
+    const auth = req.headers.get("Authorization");
+    if (!auth) return new Response(JSON.stringify({ error: "Missing Authorization Bearer token" }), { status: 401 });
+
+    const { student_id, week_start }: Body = await req.json();
+
+    // RLS-aware user client
+    const user = createClient(SUPABASE_URL, ANON_KEY, { global: { headers: { Authorization: auth } } });
+
+    // Get a path the caller is allowed to see
+    const { data: pathRow, error: pathErr } = await user
+      .rpc(week_start ? "report_path_for_week" : "latest_report_path",
+           week_start ? { p_student: student_id, p_week_start: week_start as any } : { p_student: student_id });
+    if (pathErr) throw pathErr;
+    if (!pathRow) return new Response(JSON.stringify({ ok: false, error: "No report path or not permitted" }), { status: 403 });
+
+    // Sign with service role
+    const svc = createClient(SUPABASE_URL, SERVICE_KEY);
+    const { data: signed, error: signErr } = await svc.storage.from("reports").createSignedUrl(pathRow as string, 3600);
+    if (signErr) throw signErr;
+
+    return new Response(JSON.stringify({ ok: true, url: signed.signedUrl, path: pathRow }), {
+      headers: { "content-type": "application/json" },
+    });
+  } catch (e) {
+    return new Response(JSON.stringify({ ok: false, error: String(e) }), { status: 500 });
+  }
+});

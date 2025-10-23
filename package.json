@@ -14,7 +14,8 @@
     "sb:fns:logs:notify": "bash -lc 'tail -n 200 -F /tmp/sb-fns.log | grep -i --line-buffered notify-guardian || true'",
     "sb:fns:logs:weekly": "bash -lc 'tail -n 200 -F /tmp/sb-fns.log | grep -i --line-buffered weekly-reports || true'",
     "migrations:check": "bash scripts/check-migration-order.sh",
-    "sb:smoke:edge": "bash scripts/smoke-edge.sh"
+    "sb:smoke:edge": "bash scripts/smoke-edge.sh",
+    "ci:build": "tsc -p tsconfig.json --noEmit && next build"
   },
   "repository": {
     "type": "git",
@@ -27,5 +28,14 @@
   "bugs": {
     "url": "https://github.com/jrulysesbz/-edurebel-tracking/issues"
   },
-  "homepage": "https://github.com/jrulysesbz/-edurebel-tracking#readme"
+  "homepage": "https://github.com/jrulysesbz/-edurebel-tracking#readme",
+  "devDependencies": {
+    "@types/node": "^24.7.2",
+    "typescript": "^5.9.3"
+  },
+  "dependencies": {
+    "next": "^15.5.4",
+    "react": "^19.2.0",
+    "react-dom": "^19.2.0"
+  }
 }
