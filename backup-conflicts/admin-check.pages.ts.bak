@@ -1,0 +1,19 @@
+import type { NextApiRequest, NextApiResponse } from 'next';
+
+type Ok = { ok: true };
+type Err = { error: string };
+
+export default function handler(req: NextApiRequest, res: NextApiResponse<Ok | Err>) {
+  if (req.method !== 'GET') {
+    res.setHeader('Allow', 'GET');
+    return res.status(405).json({ error: 'Method Not Allowed' });
+  }
+
+  const header = req.headers.authorization ?? '';
+  const token = header.startsWith('Bearer ') ? header.slice(7) : header;
+  const expected = process.env.ADMIN_BEARER_TOKEN;
+
+  if (!expected) return res.status(500).json({ error: 'Server misconfig: ADMIN_BEARER_TOKEN not set' });
+  if (token !== expected) return res.status(401).json({ error: 'Unauthorized' });
+  return res.status(200).json({ ok: true });
+}

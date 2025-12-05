@@ -1,0 +1,266 @@
+/* react-hooks/exhaustive-deps: fetchers are memoized via useCallback below */
+'use client';
+
+import { useEffect, useMemo, useState, useCallback } from 'react';
+import { supabaseBrowser } from '@/lib/supabaseBrowser';
+
+type Room = { id: string; name: string; meeting_url: string | null; created_by: string | null };
+type Message = { id: number; user_id: string; content: string; inserted_at: string };
+
+async function getAccessToken() {
+  const { data } = await supabaseBrowser.auth.getSession();
+  return data.session?.access_token ?? null;
+}
+
+export default function RoomsPage() {
+  const [email, setEmail] = useState('teacher@example.com');
+  const [password, setPassword] = useState('Passw0rd!');
+  const [token, setToken] = useState<string | null>(null);
+
+  const [rooms, setRooms] = useState<Room[]>([]);
+  const [activeRoomId, setActiveRoomId] = useState<string | null>(null);
+
+  const [messages, setMessages] = useState<Message[]>([]);
+  const [text, setText] = useState('');
+  const [loadingRooms, setLoadingRooms] = useState(false);
+  const [loadingMsgs, setLoadingMsgs] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+
+  // Keep token fresh
+  useEffect(() => {
+    (async () => setToken(await getAccessToken()))();
+    const { data: sub } = supabaseBrowser.auth.onAuthStateChange(async () =>
+      setToken(await getAccessToken())
+    );
+    return () => sub.subscription.unsubscribe();
+  }, []);
+
+  // Sign in/out
+  const signIn = async () => {
+    setErr(null);
+    const { error } = await supabaseBrowser.auth.signInWithPassword({ email, password });
+    if (error) setErr(error.message);
+  };
+  const signOut = async () => {
+    await supabaseBrowser.auth.signOut();
+    setRooms([]);
+    setMessages([]);
+    setActiveRoomId(null);
+  };
+
+  // Fetch rooms
+  const fetchRooms = useCallback(async () => {
+    if (!token) return;
+    setLoadingRooms(true);
+    setErr(null);
+    try {
+      const res = await fetch('/api/rooms', {
+        headers: { authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'Failed to load rooms');
+      const list: Room[] = json.data ?? [];
+      setRooms(list);
+      if (!activeRoomId && list[0]?.id) setActiveRoomId(list[0].id);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoadingRooms(false);
+    }
+  }, []);
+
+  // Fetch messages for active room
+  const fetchMessages = useCallback(async (roomId: string) => {
+    if (!token || !roomId) return;
+    setLoadingMsgs(true);
+    setErr(null);
+    try {
+      const res = await fetch(`/api/rooms/${roomId}/messages?limit=20`, {
+        headers: { authorization: `Bearer ${token}` },
+        cache: 'no-store',
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'Failed to load messages');
+      setMessages(json.data ?? []);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setLoadingMsgs(false);
+    }
+  }, []);
+
+  // Initial loads
+  useEffect(() => {
+    if (token) fetchRooms();
+  }, [token, fetchRooms]);
+
+  useEffect(() => {
+    if (token && activeRoomId) fetchMessages(activeRoomId);
+  }, [token, activeRoomId, fetchMessages]);
+
+  // Lightweight polling for new messages
+  useEffect(() => {
+    if (!token || !activeRoomId) return;
+    const id = setInterval(() => fetchMessages(activeRoomId), 3000);
+    return () => clearInterval(id);
+  }, [token, activeRoomId, fetchMessages]);
+
+  const activeRoom = useMemo(
+    () => rooms.find(r => r.id === activeRoomId) ?? null,
+    [rooms, activeRoomId]
+  );
+
+  const send = async () => {
+    if (!token || !activeRoomId || !text.trim()) return;
+    setErr(null);
+    try {
+      const res = await fetch(`/api/rooms/${activeRoomId}/messages`, {
+        method: 'POST',
+        headers: {
+          authorization: `Bearer ${token}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ content: text }, [fetchRooms]),
+      }, [fetchMessages]);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json?.error || 'Failed to send');
+      setText('');
+      // Pull latest after sending
+      fetchMessages(activeRoomId);
+    } catch (e: unknown) {
+      setErr(e instanceof Error ? e.message : String(e));
+    }
+  };
+
+  return (
+    <div className="max-w-4xl mx-auto p-4 space-y-4">
+      <h1 className="text-2xl font-semibold">Rooms</h1>
+
+      {!token ? (
+        <div className="border rounded p-3 space-y-2 max-w-md">
+          <div className="text-sm opacity-70">Sign in with your demo user</div>
+          <input
+            className="border rounded px-2 py-1 w-full"
+            value={email}
+            onChange={e => setEmail(e.target.value)}
+            placeholder="email"
+          />
+          <input
+            className="border rounded px-2 py-1 w-full"
+            type="password"
+            value={password}
+            onChange={e => setPassword(e.target.value)}
+            placeholder="password"
+          />
+          <button className="border rounded px-3 py-1" onClick={signIn}>
+            Sign in
+          </button>
+          {err && <div className="text-red-600 text-sm">{err}</div>}
+        </div>
+      ) : (
+        <div className="flex items-center gap-2">
+          <span className="text-sm opacity-70">Signed in</span>
+          <button className="border rounded px-3 py-1" onClick={signOut}>
+            Sign out
+          </button>
+        </div>
+      )}
+
+      {token && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Rooms list */}
+          <div className="border rounded p-3">
+            <div className="flex items-center justify-between mb-2">
+              <h2 className="font-medium">Your rooms</h2>
+              <button className="text-xs underline" onClick={fetchRooms} disabled={loadingRooms}>
+                refresh
+              </button>
+            </div>
+            {loadingRooms && <div className="text-sm opacity-70">Loading…</div>}
+            {!loadingRooms && rooms.length === 0 && (
+              <div className="text-sm opacity-70">No rooms yet</div>
+            )}
+            <ul className="space-y-1">
+              {rooms.map(r => (
+                <li key={r.id}>
+                  <button
+                    className={`w-full text-left px-2 py-1 rounded ${
+                      r.id === activeRoomId ? 'bg-black text-white' : 'hover:bg-gray-100'
+                    }`}
+                    onClick={() => setActiveRoomId(r.id)}
+                  >
+                    <div className="font-medium">{r.name}</div>
+                    {r.meeting_url && (
+                      <a
+                        className="text-xs underline opacity-80"
+                        href={r.meeting_url}
+                        target="_blank"
+                        rel="noreferrer"
+                        onClick={e => e.stopPropagation()}
+                      >
+                        meeting link
+                      </a>
+                    )}
+                  </button>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Messages */}
+          <div className="md:col-span-2 border rounded p-3 flex flex-col gap-3">
+            <div className="flex items-center justify-between">
+              <h2 className="font-medium">
+                {activeRoom ? activeRoom.name : 'Select a room'}
+              </h2>
+              {activeRoom && (
+                <button
+                  className="text-xs underline"
+                  onClick={() => fetchMessages(activeRoom.id)}
+                  disabled={loadingMsgs}
+                >
+                  refresh
+                </button>
+              )}
+            </div>
+
+            <div className="h-80 overflow-y-auto border rounded p-3 bg-white">
+              {loadingMsgs && <div className="text-sm opacity-70">Loading…</div>}
+              {!loadingMsgs && messages.length === 0 && (
+                <div className="text-sm opacity-70">No messages yet</div>
+              )}
+              <div className="space-y-2">
+                {messages.map(m => (
+                  <div key={m.id}>
+                    <span className="text-xs opacity-60">
+                      {new Date(m.inserted_at).toLocaleTimeString()}{' '}
+                    </span>
+                    <span className="font-mono text-xs">{m.user_id.slice(0, 8)}:</span>{' '}
+                    <span>{m.content}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            <div className="flex gap-2">
+              <input
+                className="border rounded px-2 py-1 flex-1"
+                value={text}
+                onChange={e => setText(e.target.value)}
+                placeholder="Type message…"
+                disabled={!activeRoom}
+              />
+              <button className="border rounded px-3 py-1" onClick={send} disabled={!text.trim() || !activeRoom}>
+                Send
+              </button>
+            </div>
+
+            {err && <div className="text-red-600 text-sm">{err}</div>}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+// …paste TS/JS code here…

@@ -1,0 +1,43 @@
+
+.PHONY: seed-clean
+# Usage: make seed-clean PATTERN='Seeded Student 20250929-%' DRY=1
+PATTERN ?= Seeded Student %
+DRY ?= 0
+seed-clean:
+	@echo "▶ Cleaning students matching: $(PATTERN) (dry=$(DRY))"
+	@curl -sS -X POST "http://127.0.0.1:3000/api/admin/students/cleanup" \
+	  -H "Authorization: Bearer $$(grep -m1 '^ADMIN_BEARER_TOKEN=' .env.local | cut -d= -f2-)" \
+	  -H "content-type: application/json" \
+	  --data-raw "$$(jq -n --arg p '$(PATTERN)' --argjson d $(DRY) '{pattern:$p,dryRun:$d}')" | jq .
+
+.PHONY: export-students
+# Export students CSV to ./tmp/students.csv (optional PATTERN; defaults to 'Seeded Student %')
+APP ?= http://127.0.0.1:3000
+PATTERN ?= Seeded Student %
+OUT ?= tmp/students.csv
+export-students:
+	@mkdir -p tmp
+	@APP="$(APP)" bash scripts/admin-export.sh "$(PATTERN)" "$(OUT)"
+
+.PHONY: export-students-all seed-report
+# Timestamped export (default pattern: all students with "Student" in name; adjust as needed)
+APP ?= http://127.0.0.1:3000
+PATTERN ?= Seeded Student %
+TS ?= $(shell date +%Y%m%d-%H%M%S)
+
+export-students-all:
+	@mkdir -p tmp
+	@OUT="tmp/students-$(TS).csv"; \
+	echo "▶ Exporting to $$OUT (pattern: $(PATTERN))"; \
+	APP="$(APP)" bash scripts/admin-export.sh "$(PATTERN)" "$$OUT"
+
+# Simple report: total rows and rows matching PATTERN
+seed-report:
+	@echo "▶ Report (pattern: $(PATTERN))"
+	@TOKEN=$$(grep -m1 '^ADMIN_BEARER_TOKEN=' .env.local | cut -d= -f2-); \
+	URL="$(APP)/api/admin/students/export?pattern=$$(python3 -c 'import urllib.parse,sys;print(urllib.parse.quote(sys.argv[1]))' '$(PATTERN)')"; \
+	# count lines minus header for matches
+	MATCH=$$(curl -sS "$$URL" -H "Authorization: Bearer $$TOKEN" | awk 'NR>1 && NF{c++} END{print c+0}'); \
+	# total (export without filter)
+	TOTAL=$$(curl -sS "$(APP)/api/admin/students/export?pattern=%25" -H "Authorization: Bearer $$TOKEN" | awk 'NR>1 && NF{c++} END{print c+0}'); \
+	echo "Total: $$TOTAL"; echo "Matches: $$MATCH";
