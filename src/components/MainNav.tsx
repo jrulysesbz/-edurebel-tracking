@@ -3,48 +3,45 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 
-const navItems = [
-  { href: '/', label: 'Dashboard' },
+const links = [
+  { href: '/', label: 'Overview' },
   { href: '/schools', label: 'Schools' },
   { href: '/classes', label: 'Classes' },
   { href: '/students', label: 'Students' },
   { href: '/rooms', label: 'Rooms' },
   { href: '/logs', label: 'Logs' },
+  { href: '/risk', label: 'Risk dashboard' }, // ⬅ new
 ];
 
-export function MainNav() {
+function MainNav() {
   const pathname = usePathname();
 
   return (
-    <header className="border-b border-slate-200 bg-white">
-      <div className="mx-auto flex max-w-6xl items-center justify-between gap-4 px-4 py-3">
-        <Link href="/" className="flex items-center gap-2">
-          <span className="inline-flex h-8 w-8 items-center justify-center rounded-lg bg-sky-600 text-sm font-semibold text-white">
-            ER
-          </span>
-          <span className="text-sm font-semibold tracking-tight text-slate-900">
-            EDURebel Tracker
-          </span>
+    <header className="border-b bg-white">
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3">
+        <Link href="/" className="text-sm font-semibold tracking-tight">
+          EDURebel Tracker
         </Link>
 
-        <nav className="flex items-center gap-1 text-sm">
-          {navItems.map((item) => {
+        <nav className="flex flex-wrap items-center gap-2 text-sm">
+          {links.map((link) => {
             const isActive =
-              pathname === item.href ||
-              (item.href !== '/' && pathname?.startsWith(item.href));
+              link.href === '/'
+                ? pathname === '/'
+                : pathname === link.href || pathname.startsWith(link.href + '/');
 
             return (
               <Link
-                key={item.href}
-                href={item.href}
+                key={link.href}
+                href={link.href}
                 className={[
-                  'rounded-md px-2.5 py-1.5 text-xs font-medium',
+                  'inline-flex items-center rounded-full px-3 py-1 text-xs font-medium transition-colors',
                   isActive
                     ? 'bg-slate-900 text-white'
-                    : 'text-slate-600 hover:bg-slate-100 hover:text-slate-900',
+                    : 'bg-slate-100 text-slate-700 hover:bg-slate-200',
                 ].join(' ')}
               >
-                {item.label}
+                {link.label}
               </Link>
             );
           })}
@@ -53,4 +50,8 @@ export function MainNav() {
     </header>
   );
 }
+
+// Export both ways so layout.tsx is happy no matter how it imports
+export { MainNav };
+export default MainNav;
 
