@@ -70,6 +70,7 @@ body {
 /* ===========================
    Print-friendly layout
    =========================== */
+/* === Print-friendly layout for reports & risk dashboards === */
 @media print {
   html,
   body {
@@ -79,40 +80,48 @@ body {
     color: #000000 !important;
   }
 
-  /* Hide typical navigation / chrome if you add classes later */
+  /* Hide chrome / navigation / buttons when printing */
+  header,
   nav,
-  header.site-header,
   footer,
   .no-print {
     display: none !important;
   }
 
-  /* Remove shadows / borders on main content for clean print */
   main {
+    margin: 0 !important;
+    padding: 0 !important;
     box-shadow: none !important;
-    border: none !important;
     background: #ffffff !important;
   }
 
-  /* Optional: if you decide to wrap reports with this class later */
-  .print-report {
+  /* Wrapper you can use around report content */
+  .print-container {
+    background: #ffffff !important;
+    color: #000000 !important;
     padding: 0 !important;
-    margin: 0 !important;
-    border: none !important;
-    box-shadow: none !important;
   }
 
-  /* Avoid splitting key cards/sections across pages */
-  .print-report-card {
+  /* Avoid ugly splits in cards/rows */
+  .break-inside-avoid {
     break-inside: avoid;
     page-break-inside: avoid;
   }
 
-  /* Make links look like text (no long URLs printed) */
-  a[href]:after {
-    content: '';
+  /* Force a section to start on a new page if desired */
+  .print-page-break {
+    page-break-before: always;
+  }
+
+  /* Make links look like normal text */
+  a {
+    color: #000000 !important;
+    text-decoration: none !important;
   }
 }
+
+
+
 
 /* =========================================================
    Print layout for behavior reports

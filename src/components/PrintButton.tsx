@@ -1,16 +1,10 @@
 'use client';
 
-import * as React from 'react';
-
 type PrintButtonProps = {
   label?: string;
-  className?: string;
 };
 
-export default function PrintButton({
-  label = 'Print',
-  className = '',
-}: PrintButtonProps) {
+export default function PrintButton({ label = 'Print' }: PrintButtonProps) {
   const handleClick = () => {
     if (typeof window !== 'undefined') {
       window.print();
@@ -21,10 +15,7 @@ export default function PrintButton({
     <button
       type="button"
       onClick={handleClick}
-      className={
-        className ||
-        'inline-flex items-center rounded-full border border-slate-300 bg-white px-3 py-1.5 text-xs font-medium text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-1'
-      }
+      className="no-print inline-flex items-center rounded-md bg-slate-900 px-3 py-1.5 text-xs font-semibold text-white shadow-sm hover:bg-slate-800 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2"
     >
       {label}
     </button>
