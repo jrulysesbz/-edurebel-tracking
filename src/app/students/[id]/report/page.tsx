@@ -1,304 +1,479 @@
-// =========================================================
 // src/app/students/[id]/report/page.tsx
-// Student behavior report with parent-friendly summary
-// =========================================================
-
 import Link from 'next/link';
-import { supabase } from '@/lib/supabaseClient';
+import { supabase } from '@/lib/supabaseServer';
 import type { Database } from '@/lib/supabase.types';
+import PrintButton from '@/components/PrintButton';
 
-export const dynamic = 'force-dynamic';
+type Db = Database['public']['Tables'];
 
-type StudentRow = Database['public']['Tables']['students']['Row'];
-type ClassRow = Database['public']['Tables']['classes']['Row'];
-type BehaviorLogRow = Database['public']['Tables']['behavior_logs']['Row'];
+type StudentRow = Db['students']['Row'];
+type ClassRow = Db['classes']['Row'];
+type BehaviorLogRow = Db['behavior_logs']['Row'];
 
-type RangeKey = '7d' | '30d' | '90d';
+type RangeKey = '7d' | '30d' | '90d' | '12m' | 'all';
 
 type PageProps = {
   params: Promise<{ id: string }>;
-  searchParams?: Promise<{ range?: string }>;
+  searchParams: Promise<{ range?: string | string[] }>;
 };
 
-function getRangeInfo(rangeParam?: string): {
-  key: RangeKey;
-  fromIso: string | null;
-  label: string;
-} {
-  let key: RangeKey;
-
-  if (rangeParam === '7d' || rangeParam === '90d') {
-    key = rangeParam;
-  } else {
-    key = '30d';
-  }
-
+function getRangeInfo(
+  rangeParam: string | null
+): { key: RangeKey; fromIso: string | null; label: string } {
   const now = new Date();
-  const msPerDay = 24 * 60 * 60 * 1000;
-  let fromIso: string | null = null;
 
-  if (key === '7d') {
-    fromIso = new Date(now.getTime() - 7 * msPerDay).toISOString();
-  } else if (key === '30d') {
-    fromIso = new Date(now.getTime() - 30 * msPerDay).toISOString();
-  } else {
-    fromIso = new Date(now.getTime() - 90 * msPerDay).toISOString();
+  switch (rangeParam) {
+    case '7d': {
+      const from = new Date(now);
+      from.setDate(from.getDate() - 7);
+      return {
+        key: '7d',
+        fromIso: from.toISOString(),
+        label: 'Last 7 days',
+      };
+    }
+    case '90d': {
+      const from = new Date(now);
+      from.setDate(from.getDate() - 90);
+      return {
+        key: '90d',
+        fromIso: from.toISOString(),
+        label: 'Last 90 days',
+      };
+    }
+    case '12m': {
+      const from = new Date(now);
+      from.setMonth(from.getMonth() - 12);
+      return {
+        key: '12m',
+        fromIso: from.toISOString(),
+        label: 'Last 12 months',
+      };
+    }
+    case 'all': {
+      return {
+        key: 'all',
+        fromIso: null,
+        label: 'All time',
+      };
+    }
+    case '30d':
+    default: {
+      const from = new Date(now);
+      from.setDate(from.getDate() - 30);
+      return {
+        key: '30d',
+        fromIso: from.toISOString(),
+        label: 'Last 30 days',
+      };
+    }
   }
-
-  const label =
-    key === '7d' ? 'Last 7 days' : key === '30d' ? 'Last 30 days' : 'Last 90 days';
-
-  return { key, fromIso, label };
 }
 
-function formatDateTime(value: string | null | undefined): string {
-  if (!value) return '';
-  const d = new Date(value);
-  if (Number.isNaN(d.getTime())) return '';
-  return d.toLocaleString('en-US', {
-    month: 'short',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-  });
-}
-
-async function getStudentWithClass(
-  id: string
-): Promise<{ student: StudentRow | null; classRow: ClassRow | null }> {
+async function getStudentAndClass(id: string): Promise<{
+  student: StudentRow | null;
+  classRow: ClassRow | null;
+}> {
   const supabaseAny = supabase as any;
 
-  try {
-    const { data, error } = await supabaseAny
-      .from('students')
-      .select(
-        `
+  const { data, error } = await supabaseAny
+    .from('students')
+    .select(
+      `
         id,
         first_name,
         last_name,
         code,
-        is_live,
         class_id,
+        is_live,
         classes:class_id (
           id,
           name,
           room
         )
       `
-      )
-      .eq('id', id)
-      .maybeSingle();
+    )
+    .eq('id', id)
+    .maybeSingle();
 
-    if (error) {
-      console.error('Error loading student for report', error);
-      return { student: null, classRow: null };
-    }
-
-    if (!data) {
-      return { student: null, classRow: null };
-    }
-
-    const classesRel = (data as any).classes ?? null;
-
-    return {
-      student: data as StudentRow,
-      classRow: classesRel as ClassRow | null,
-    };
-  } catch (err) {
-    console.error('Unexpected error loading student for report', err);
+  if (error) {
+    console.error('Error loading student for report', error);
     return { student: null, classRow: null };
   }
+
+  if (!data) {
+    return { student: null, classRow: null };
+  }
+
+  const classRow: ClassRow | null = data.classes
+    ? {
+        id: data.classes.id,
+        name: data.classes.name,
+        room: data.classes.room,
+        // fill any required fields with null/undefined-safe defaults
+        // @ts-expect-error – ignore extra/missing fields from narrow select
+      }
+    : null;
+
+  const student: StudentRow = {
+    id: data.id,
+    first_name: data.first_name,
+    last_name: data.last_name,
+    code: data.code,
+    class_id: data.class_id,
+    is_live: data.is_live,
+    // @ts-expect-error – ignore other columns we didn't select
+  };
+
+  return { student, classRow };
 }
 
-async function getLogsForStudent(
+async function getStudentLogs(
   studentId: string,
   fromIso: string | null
-): Promise<BehaviorLogRow[]> {
+): Promise<
+  (BehaviorLogRow & {
+    classes?: { id: string; name: string | null } | null;
+  })[]
+> {
   const supabaseAny = supabase as any;
 
   try {
     let query = supabaseAny
       .from('behavior_logs')
-      .select('id, summary, level, occurred_at, student_id, class_id')
+      .select(
+        `
+        id,
+        created_at,
+        severity,
+        category,
+        room,
+        summary,
+        class_id,
+        classes:class_id (
+          id,
+          name
+        )
+      `
+      )
       .eq('student_id', studentId)
-      .order('occurred_at', { ascending: false });
+      .order('created_at', { ascending: false });
 
     if (fromIso) {
-      query = query.gte('occurred_at', fromIso);
+      query = query.gte('created_at', fromIso);
     }
 
     const { data, error } = await query;
 
     if (error) {
-      console.error('Error loading logs for student report', error);
+      console.error('Error loading student logs for report', error);
       return [];
     }
 
-    return (data ?? []) as BehaviorLogRow[];
+    return (data ?? []) as any[];
   } catch (err) {
-    console.error('Unexpected error loading logs for student report', err);
+    console.error('Unexpected error loading student logs for report', err);
     return [];
   }
 }
 
-export default async function StudentReportPage({
-  params,
-  searchParams,
-}: PageProps) {
-  // ✅ New Next 15 async dynamic APIs: await both
-  const { id } = await params;
-  const sp = (searchParams ? await searchParams : {}) ?? {};
-  const rangeParam = sp.range;
+function summarizeLogs(logs: BehaviorLogRow[]) {
+  const bySeverity = new Map<string, number>();
+  const byCategory = new Map<string, number>();
 
-  const { key: rangeKey, fromIso, label: rangeLabel } = getRangeInfo(rangeParam);
+  for (const log of logs as any[]) {
+    const sev = log.severity ?? 'Unspecified';
+    const cat = log.category ?? 'Uncategorized';
+
+    bySeverity.set(sev, (bySeverity.get(sev) ?? 0) + 1);
+    byCategory.set(cat, (byCategory.get(cat) ?? 0) + 1);
+  }
+
+  return {
+    total: logs.length,
+    bySeverity,
+    byCategory,
+  };
+}
+
+function formatDateTime(iso: string | null | undefined) {
+  if (!iso) return '';
+  try {
+    return new Date(iso).toLocaleString('en-TW', {
+      timeZone: 'Asia/Taipei',
+    });
+  } catch {
+    return iso;
+  }
+}
+
+export default async function StudentReportPage(props: PageProps) {
+  const { params, searchParams } = props;
+
+  const { id } = await params;
+  const sp = await searchParams;
+
+  const rangeParamRaw = sp?.range;
+  const rangeParam =
+    Array.isArray(rangeParamRaw) && rangeParamRaw.length > 0
+      ? rangeParamRaw[0]
+      : rangeParamRaw ?? null;
+
+  const { key: rangeKey, fromIso, label: rangeLabel } =
+    getRangeInfo(rangeParam);
+
+  const exportUrl = `/api/student-report-export?student_id=${encodeURIComponent(
+    id
+  )}&range=${encodeURIComponent(rangeKey)}`;
 
   const [{ student, classRow }, logs] = await Promise.all([
-    getStudentWithClass(id),
-    getLogsForStudent(id, fromIso),
+    getStudentAndClass(id),
+    getStudentLogs(id, fromIso),
   ]);
 
   if (!student) {
     return (
-      <main className="space-y-4 p-4">
-        <div className="text-xs text-slate-500">
-          <Link href="/students" className="hover:underline">
-            ← Back to students
-          </Link>
-        </div>
-        <p className="text-sm text-slate-700">Student not found.</p>
-      </main>
+      <div className="space-y-4">
+        <h1 className="text-2xl font-semibold tracking-tight">
+          Student not found
+        </h1>
+        <p className="text-sm text-slate-600">
+          This student could not be found. They may have been removed or
+          deactivated.
+        </p>
+        <Link
+          href="/students"
+          className="inline-flex text-sm font-medium text-indigo-600 hover:text-indigo-500"
+        >
+          ← Back to students
+        </Link>
+      </div>
     );
   }
 
-  const fullName =
-    [student.first_name, student.last_name].filter(Boolean).join(' ') ||
-    'Unnamed student';
+  const stats = summarizeLogs(logs as any);
 
-  const totalLogs = logs.length;
-  const positiveCount = logs.filter((l) => l.level === 'positive').length;
-  const neutralCount = logs.filter((l) => l.level === 'neutral').length;
-  const minorCount = logs.filter((l) => l.level === 'minor').length;
-  const majorCount = logs.filter((l) => l.level === 'major').length;
-
-  const rangePills: { key: RangeKey; label: string }[] = [
-    { key: '7d', label: '7 days' },
-    { key: '30d', label: '30 days' },
-    { key: '90d', label: '90 days' },
-  ];
+  const studentName = [student.first_name, student.last_name]
+    .filter(Boolean)
+    .join(' ');
 
   return (
-    <main className="space-y-6 p-4 print-report">
-      {/* Top nav / tip (hidden on print) */}
-      <div className="flex items-center justify-between gap-2 no-print">
-        <div className="text-xs text-slate-500">
-          <Link href={`/students/${student.id}`} className="hover:underline">
-            ← Back to student profile
-          </Link>
+    <div className="space-y-6">
+      <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="space-y-1">
+          <h1 className="text-2xl font-semibold tracking-tight">
+            Student behavior report
+          </h1>
+          <p className="text-sm text-slate-600">
+            Timeline of logs, categories, and risk for this student. Use the
+            range filter to control the window, then print or export for
+            meetings, SSTs, and parent conferences.
+          </p>
         </div>
-        <p className="text-[10px] text-slate-400">
-          Tip: Use your browser&apos;s Print command (⌘P) to save this report as
-          PDF.
-        </p>
-      </div>
 
-      {/* Header */}
-      <header className="space-y-1">
-        <h1 className="text-2xl font-semibold tracking-tight">
-          Behavior report — {fullName}
-        </h1>
-        <p className="text-sm text-slate-600">
-          Summary of logged behavior ({rangeLabel.toLowerCase()}).
-        </p>
-        <p className="text-xs text-slate-500">
-          Student code:{' '}
-          <span className="font-medium">{student.code ?? '—'}</span>
-          {classRow ? (
-            <>
-              {' · '}Class:{' '}
-              <span className="font-medium">{classRow.name ?? '—'}</span>
-              {classRow.room ? (
-                <>
-                  {' · '}Room <span className="font-medium">{classRow.room}</span>
-                </>
-              ) : null}
-            </>
-          ) : null}
-        </p>
+        <div className="no-print flex items-center gap-2">
+          <PrintButton label="Print student report" />
+          <a
+            href={exportUrl}
+            className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2"
+          >
+            Export CSV
+          </a>
+        </div>
       </header>
 
-      {/* Parent-friendly summary card */}
-      <section className="rounded-lg border border-slate-200 bg-slate-50 p-4 text-sm print-report-card">
-        <p className="font-medium text-slate-800">
-          In {rangeLabel.toLowerCase()}, we recorded {totalLogs} behavior entr
-          {totalLogs === 1 ? 'y' : 'ies'} for {fullName}.
-        </p>
-        <p className="mt-1 text-slate-700">
-          Positive notes:{' '}
-          <span className="font-semibold">{positiveCount}</span> · Neutral:{' '}
-          <span className="font-semibold">{neutralCount}</span> · Minor concerns:{' '}
-          <span className="font-semibold">{minorCount}</span> · Major concerns:{' '}
-          <span className="font-semibold">{majorCount}</span>.
-        </p>
-        <p className="mt-1 text-xs text-slate-500">
-          This report supports home–school communication by highlighting strengths
-          and patterns over time. It is not a formal disciplinary record.
-        </p>
+      <nav className="no-print text-xs text-slate-600">
+        <Link
+          href="/students"
+          className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-500"
+        >
+          ← Back to students
+        </Link>
+      </nav>
+
+      {/* Student summary */}
+      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div>
+            <h2 className="text-sm font-semibold text-slate-800">
+              {studentName || 'Unnamed student'}{' '}
+              {student.code ? (
+                <span className="text-xs font-normal text-slate-500">
+                  ({student.code})
+                </span>
+              ) : null}
+            </h2>
+            <p className="text-xs text-slate-600">
+              Class:{' '}
+              {classRow?.name ? (
+                <span className="font-medium">
+                  {classRow.name}
+                  {classRow.room ? ` – Room ${classRow.room}` : ''}
+                </span>
+              ) : (
+                <span className="italic text-slate-500">No class assigned</span>
+              )}
+            </p>
+            <p className="text-xs text-slate-600">
+              Status:{' '}
+              {student.is_live ? (
+                <span className="inline-flex items-center rounded-full bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-700 ring-1 ring-emerald-200">
+                  Active
+                </span>
+              ) : (
+                <span className="inline-flex items-center rounded-full bg-slate-50 px-2 py-0.5 text-[11px] font-medium text-slate-600 ring-1 ring-slate-200">
+                  Inactive
+                </span>
+              )}
+            </p>
+          </div>
+
+          <div className="text-right text-xs text-slate-500">
+            <div>Range: {rangeLabel}</div>
+            <div>
+              Logs in range:{' '}
+              <span className="font-semibold text-slate-700">
+                {stats.total}
+              </span>
+            </div>
+          </div>
+        </div>
       </section>
 
-      {/* Range pills (7 / 30 / 90 days) */}
-      <section className="flex flex-wrap gap-2 text-xs no-print">
-        {rangePills.map((pill) => {
-          const isActive = pill.key === rangeKey;
-          const href = `/students/${student.id}/report?range=${pill.key}`;
-          return (
-            <Link
-              key={pill.key}
-              href={href}
-              className={
-                'inline-flex items-center rounded-full border px-3 py-1 font-medium ' +
-                (isActive
+      {/* Range filters */}
+      <section className="no-print rounded-lg border border-slate-200 bg-slate-50 p-3 text-xs text-slate-700">
+        <form className="flex flex-wrap items-center gap-2" method="get">
+          <span className="font-medium">Range:</span>
+          {[
+            { key: '7d', label: '7d' },
+            { key: '30d', label: '30d' },
+            { key: '90d', label: '90d' },
+            { key: '12m', label: '12m' },
+            { key: 'all', label: 'All' },
+          ].map((opt) => (
+            <button
+              key={opt.key}
+              type="submit"
+              name="range"
+              value={opt.key}
+              className={[
+                'inline-flex items-center rounded-full border px-2 py-0.5 text-[11px]',
+                rangeKey === opt.key
                   ? 'border-slate-900 bg-slate-900 text-white'
-                  : 'border-slate-200 bg-slate-50 text-slate-700 hover:bg-slate-100')
-              }
+                  : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-100',
+              ].join(' ')}
             >
-              {pill.label}
-            </Link>
-          );
-        })}
+              {opt.label}
+            </button>
+          ))}
+        </form>
       </section>
 
-      {/* Detailed log list */}
-      <section className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm print-report-card">
-        <h2 className="text-sm font-semibold text-slate-800">Log entries</h2>
+      {/* Stats summary */}
+      <section className="grid gap-4 md:grid-cols-2 print:grid-cols-2">
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <h2 className="mb-2 text-sm font-semibold text-slate-800">
+            By severity
+          </h2>
+          {stats.bySeverity.size === 0 ? (
+            <p className="text-xs text-slate-500">
+              No logs in this range for this student.
+            </p>
+          ) : (
+            <ul className="space-y-1 text-xs">
+              {Array.from(stats.bySeverity.entries()).map(([sev, count]) => (
+                <li key={sev} className="flex items-center justify-between">
+                  <span className="truncate">{sev}</span>
+                  <span className="ml-2 inline-flex min-w-[2rem] justify-end font-semibold text-slate-800">
+                    {count}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+
+        <div className="rounded-lg border border-slate-200 bg-white p-4">
+          <h2 className="mb-2 text-sm font-semibold text-slate-800">
+            By category
+          </h2>
+          {stats.byCategory.size === 0 ? (
+            <p className="text-xs text-slate-500">
+              No categorized logs in this range.
+            </p>
+          ) : (
+            <ul className="space-y-1 text-xs">
+              {Array.from(stats.byCategory.entries()).map(([cat, count]) => (
+                <li key={cat} className="flex items-center justify-between">
+                  <span className="truncate">{cat}</span>
+                  <span className="ml-2 inline-flex min-w-[2rem] justify-end font-semibold text-slate-800">
+                    {count}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          )}
+        </div>
+      </section>
+
+      {/* Timeline */}
+      <section className="rounded-lg border border-slate-200 bg-white p-4">
+        <h2 className="mb-3 text-sm font-semibold text-slate-800">
+          Behavior timeline
+        </h2>
 
         {logs.length === 0 ? (
-          <p className="mt-2 text-sm text-slate-500">
-            No behavior logs recorded for this period.
+          <p className="text-xs text-slate-500">
+            No behavior logs for this student in the selected range.
           </p>
         ) : (
-          <ul className="mt-2 divide-y divide-slate-100 text-sm">
-            {logs.map((log) => (
-              <li
-                key={log.id}
-                className="flex items-start justify-between gap-2 py-2"
-              >
-                <div className="flex flex-col">
-                  <p className="font-medium text-slate-900">
-                    {(log as any).summary ?? 'No summary'}
-                  </p>
-                  <p className="mt-0.5 text-xs text-slate-500">
-                    {formatDateTime((log as any).occurred_at as string)}
-                  </p>
-                </div>
-                <span className="mt-0.5 inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium text-slate-700">
-                  {((log as any).level as string) ?? '—'}
-                </span>
-              </li>
-            ))}
-          </ul>
+          <ol className="space-y-3 text-xs">
+            {logs.map((log: any) => {
+              const dt = formatDateTime(log.created_at);
+              const sev = log.severity ?? 'Unspecified';
+              const cat = log.category ?? 'Uncategorized';
+              const clsName = log.classes?.name ?? classRow?.name ?? '';
+
+              return (
+                <li
+                  key={log.id}
+                  className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2"
+                >
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="font-semibold text-slate-800">
+                        {dt}
+                      </span>
+                      {clsName ? (
+                        <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] text-slate-800">
+                          {clsName}
+                          {log.room ? ` – Room ${log.room}` : ''}
+                        </span>
+                      ) : null}
+                    </div>
+
+                    <div className="flex flex-wrap items-center gap-1">
+                      <span className="rounded-full bg-slate-900 px-2 py-0.5 text-[11px] font-semibold uppercase tracking-wide text-white">
+                        {sev}
+                      </span>
+                      <span className="rounded-full bg-slate-200 px-2 py-0.5 text-[11px] text-slate-800">
+                        {cat}
+                      </span>
+                    </div>
+                  </div>
+
+                  {log.summary ? (
+                    <p className="mt-1 text-[11px] leading-snug text-slate-700">
+                      {log.summary}
+                    </p>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ol>
         )}
       </section>
-    </main>
+    </div>
   );
 }
 
