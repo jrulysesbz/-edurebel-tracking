@@ -2,10 +2,13 @@
 // src/app/risk/page.tsx
 // =========================================================
 
+
 import Link from 'next/link';
-import { supabase } from '@/lib/supabaseServer';
+import { supabase } from '@/lib/supabaseClient';
 import type { Database } from '@/lib/supabase.types';
 import PrintButton from '@/components/PrintButton';
+
+
 
 export const dynamic = 'force-dynamic';
 
