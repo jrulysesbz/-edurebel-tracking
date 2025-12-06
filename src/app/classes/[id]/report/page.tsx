@@ -4,230 +4,191 @@
 // =========================================================
 
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
+import PrintButton from '@/components/PrintButton';
 import { supabase } from '@/lib/supabaseServer';
 import type { Database } from '@/lib/supabase.types';
-import PrintButton from '@/components/PrintButton';
 
+type ClassRow = Database['public']['Tables']['classes']['Row'];
 type BehaviorLogRow = Database['public']['Tables']['behavior_logs']['Row'];
 type StudentRow = Database['public']['Tables']['students']['Row'];
-type ClassRow = Database['public']['Tables']['classes']['Row'];
 
-type ClassReportLog = BehaviorLogRow & {
-  student_name: string | null;
-  student_code: string | null;
-  class_name: string | null;
-  class_room: string | null;
-};
+type RangeKey = '7d' | '30d' | '90d' | '12m';
 
-const RANGE_OPTIONS = [
-  { key: '7d', label: 'Last 7 days' },
-  { key: '30d', label: 'Last 30 days' },
-  { key: '90d', label: 'Last 90 days' },
-  { key: '12m', label: 'Last 12 months' },
-] as const;
+function getRangeInfo(rangeParamRaw: string | undefined): {
+  key: RangeKey;
+  fromIso: string;
+  label: string;
+} {
+  const now = new Date();
+  let key: RangeKey;
 
-type RangeKey = (typeof RANGE_OPTIONS)[number]['key'];
-
-function getRangeInfo(
-  raw?: string | string[]
-): { key: RangeKey; fromIso: string | null; label: string } {
-  let range: string | undefined;
-
-  if (Array.isArray(raw)) {
-    range = raw[0];
+  if (rangeParamRaw === '7d' || rangeParamRaw === '90d' || rangeParamRaw === '12m') {
+    key = rangeParamRaw;
   } else {
-    range = raw;
+    key = '30d';
   }
 
-  const now = new Date();
-  let from = new Date(now);
-  let key: RangeKey = '30d';
-  let label = 'Last 30 days';
+  const from = new Date(now);
 
-  switch (range) {
+  switch (key) {
     case '7d':
-      key = '7d';
-      label = 'Last 7 days';
       from.setDate(now.getDate() - 7);
       break;
     case '90d':
-      key = '90d';
-      label = 'Last 90 days';
       from.setDate(now.getDate() - 90);
       break;
     case '12m':
-      key = '12m';
-      label = 'Last 12 months';
-      from.setFullYear(now.getFullYear() - 1);
+      from.setMonth(now.getMonth() - 12);
       break;
     case '30d':
     default:
-      key = '30d';
-      label = 'Last 30 days';
       from.setDate(now.getDate() - 30);
       break;
   }
 
-  const fromIso = from.toISOString();
-  return { key, fromIso, label };
+  let label = 'Last 30 days';
+  if (key === '7d') label = 'Last 7 days';
+  if (key === '90d') label = 'Last 90 days';
+  if (key === '12m') label = 'Last 12 months';
+
+  return {
+    key,
+    fromIso: from.toISOString(),
+    label,
+  };
 }
 
-async function getClassReportData(
-  classId: string,
-  fromIso: string | null
-): Promise<{ classRow: ClassRow | null; logs: ClassReportLog[] }> {
+async function getClassRow(classId: string): Promise<ClassRow | null> {
   const supabaseAny = supabase as any;
 
-  const [{ data: classData, error: classError }, logsRes] = await Promise.all([
-    supabaseAny
-      .from('classes')
-      .select('id, name, room')
-      .eq('id', classId)
-      .limit(1),
-    (async () => {
-      let query = supabaseAny
-        .from('behavior_logs')
-        .select(
-          `
-            id,
-            created_at,
-            student_id,
-            class_id,
-            category,
-            severity,
-            summary,
-            room
-          `
-        )
-        .eq('class_id', classId)
-        .order('created_at', { ascending: true });
+  const { data, error } = await supabaseAny
+    .from('classes')
+    .select('id, name, room')
+    .eq('id', classId)
+    .maybeSingle();
 
-      if (fromIso) {
-        query = query.gte('created_at', fromIso);
-      }
-
-      const { data, error } = await query;
-      return { data, error };
-    })(),
-  ]);
-
-  if (classError) {
-    console.error('Error loading class for report', classError);
+  if (error) {
+    console.error('Error loading class for report', error);
+    return null;
   }
 
-  const classRow = (classData?.[0] as ClassRow | undefined) ?? null;
-
-  if (!classRow) {
-    return { classRow: null, logs: [] };
-  }
-
-  if (logsRes.error) {
-    console.error('Error loading class behavior logs', logsRes.error);
-    return { classRow, logs: [] };
-  }
-
-  const logs = (logsRes.data ?? []) as BehaviorLogRow[];
-
-  // Collect student IDs for name/code lookup
-  const studentIds = Array.from(
-    new Set(
-      logs
-        .map((log) => log.student_id)
-        .filter((id): id is string => !!id)
-    )
-  );
-
-  let studentsById = new Map<
-    string,
-    { first_name: string | null; last_name: string | null; code: string | null }
-  >();
-
-  if (studentIds.length > 0) {
-    const { data: studentsData, error: studentsError } = (await supabaseAny
-      .from('students')
-      .select('id, first_name, last_name, code')
-      .in('id', studentIds)) as {
-      data: StudentRow[] | null;
-      error: Error | null;
-    };
-
-    if (studentsError) {
-      console.error('Error loading students for class report', studentsError);
-    }
-
-    if (studentsData) {
-      studentsById = new Map(
-        studentsData.map((s) => [
-          s.id,
-          {
-            first_name: s.first_name ?? null,
-            last_name: s.last_name ?? null,
-            code: s.code ?? null,
-          },
-        ])
-      );
-    }
-  }
-
-  const enriched: ClassReportLog[] = logs.map((log) => {
-    const student = log.student_id ? studentsById.get(log.student_id) : undefined;
-
-    const studentName = student
-      ? `${student.first_name ?? ''} ${student.last_name ?? ''}`.trim() || null
-      : null;
-
-    const studentCode = student?.code ?? null;
-
-    return {
-      ...log,
-      student_name: studentName,
-      student_code: studentCode,
-      class_name: classRow.name ?? null,
-      class_room: classRow.room ?? null,
-    };
-  });
-
-  return { classRow, logs: enriched };
+  return (data ?? null) as ClassRow | null;
 }
 
-type PageProps = {
-  params: { id: string } | Promise<{ id: string }>;
-  searchParams?:
-    | { range?: string | string[] }
-    | Promise<{ range?: string | string[] } | undefined>;
-};
+async function getClassLogs(
+  classId: string,
+  fromIso: string
+): Promise<BehaviorLogRow[]> {
+  const supabaseAny = supabase as any;
 
-export default async function ClassReportPage({ params, searchParams }: PageProps) {
-  const resolvedParams = await params;
-  const resolvedSearchParams = searchParams ? await searchParams : undefined;
+  try {
+    let query = supabaseAny
+      .from('behavior_logs')
+      .select(
+        `
+        id,
+        created_at,
+        student_id,
+        class_id,
+        room,
+        category,
+        severity,
+        summary,
+        students:student_id (
+          id,
+          first_name,
+          last_name,
+          code
+        ),
+        classes:class_id (
+          id,
+          name,
+          room
+        )
+      `
+      )
+      .eq('class_id', classId)
+      .order('created_at', { ascending: false });
 
-  const id = resolvedParams.id;
+    if (fromIso) {
+      query = query.gte('created_at', fromIso);
+    }
 
-  const rangeParam = resolvedSearchParams?.range;
-  const { key: rangeKey, fromIso, label: rangeLabel } = getRangeInfo(rangeParam);
+    const { data, error } = await query;
+
+    if (error) {
+      console.error('Error loading behavior logs for class report', error);
+      return [];
+    }
+
+    return (data ?? []) as BehaviorLogRow[];
+  } catch (err) {
+    console.error('Unexpected error loading class logs', err);
+    return [];
+  }
+}
+
+export const dynamic = 'force-dynamic';
+
+export default async function ClassReportPage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ range?: string | string[] }>;
+}) {
+  const { id } = await params;
+  const sp = (await searchParams) ?? {};
+  const rangeParamRaw = sp.range;
+  const rangeParam =
+    Array.isArray(rangeParamRaw) && rangeParamRaw.length > 0
+      ? rangeParamRaw[0]
+      : rangeParamRaw;
+
+  const { key: rangeKey, fromIso, label: rangeLabel } = getRangeInfo(
+    rangeParam ?? undefined
+  );
   const exportUrl = `/api/class-report-export?class_id=${encodeURIComponent(
     id
   )}&range=${encodeURIComponent(rangeKey)}`;
 
-  const { classRow, logs } = await getClassReportData(id, fromIso);
+  const [classRow, logs] = await Promise.all([
+    getClassRow(id),
+    getClassLogs(id, fromIso),
+  ]);
 
   if (!classRow) {
-    notFound();
+    return (
+      <main className="mx-auto max-w-4xl px-4 py-10">
+        <h1 className="text-xl font-semibold text-red-700">
+          Class not found
+        </h1>
+        <p className="mt-2 text-sm text-slate-600">
+          We couldn&apos;t find that class record. Please go back to the Classes
+          list and try again.
+        </p>
+        <div className="mt-4">
+          <Link
+            href="/classes"
+            className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
+          >
+            Back to Classes
+          </Link>
+        </div>
+      </main>
+    );
   }
 
-  const totalLogs = logs.length;
-  const highCount = logs.filter((l) => l.severity === 'high').length;
-  const mediumCount = logs.filter((l) => l.severity === 'medium').length;
-  const lowCount = logs.filter((l) => l.severity === 'low').length;
-
   return (
-    <main className="space-y-6">
+    <main className="mx-auto max-w-5xl space-y-6 px-4 py-6 print:px-0">
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">
             Class behavior report
           </h1>
+          <p className="text-xs font-medium text-slate-500">
+            Range: {rangeLabel}
+          </p>
           <p className="text-sm text-slate-600">
             Timeline of logs, categories, and risk for this class. Use the range
             filter to control the window, then print or export for team meetings,
@@ -246,149 +207,139 @@ export default async function ClassReportPage({ params, searchParams }: PageProp
         </div>
       </header>
 
-      <section className="space-y-2">
-        <div className="rounded-lg border border-slate-200 bg-white p-4 shadow-sm print:border-0 print:shadow-none">
-          <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <div>
-              <h2 className="text-base font-semibold text-slate-900">
-                {classRow.name}{' '}
-                {classRow.room ? (
-                  <span className="text-sm font-normal text-slate-500">
-                    • Room {classRow.room}
-                  </span>
-                ) : null}
-              </h2>
-              <p className="text-xs text-slate-500 print:text-slate-700">
-                Showing logs for {rangeLabel}. Total logs:{' '}
-                <span className="font-semibold">{totalLogs}</span>
-              </p>
-            </div>
+      <section className="grid gap-4 rounded-lg border border-slate-200 bg-white p-4 text-sm print:border-none print:bg-transparent">
+        <div className="flex flex-wrap items-baseline justify-between gap-2">
+          <div className="space-y-0.5">
+            <p className="text-xs uppercase tracking-wide text-slate-500">
+              Class
+            </p>
+            <p className="text-base font-semibold text-slate-900">
+              {classRow.name ?? 'Unnamed class'}
+            </p>
+          </div>
+          <div className="no-print">
+            <Link
+              href={`/classes/${classRow.id}`}
+              className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
+            >
+              View class page
+            </Link>
+          </div>
+        </div>
 
-            <div className="no-print flex flex-col items-end gap-2 text-xs">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="text-slate-500">Range:</span>
-                {RANGE_OPTIONS.map((opt) => {
-                  const isActive = opt.key === rangeKey;
-                  const href = `?range=${encodeURIComponent(opt.key)}`;
-                  return (
-                    <Link
-                      key={opt.key}
-                      href={href}
-                      className={[
-                        'inline-flex items-center rounded-full border px-3 py-1 text-xs font-medium',
-                        isActive
-                          ? 'border-slate-900 bg-slate-900 text-white'
-                          : 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50',
-                      ].join(' ')}
-                    >
-                      {opt.label}
-                    </Link>
-                  );
-                })}
-              </div>
-              <div className="flex flex-wrap gap-2">
-                <span className="inline-flex items-center rounded-full bg-red-50 px-2.5 py-0.5 text-[11px] font-medium text-red-700">
-                  High: {highCount}
-                </span>
-                <span className="inline-flex items-center rounded-full bg-amber-50 px-2.5 py-0.5 text-[11px] font-medium text-amber-700">
-                  Medium: {mediumCount}
-                </span>
-                <span className="inline-flex items-center rounded-full bg-emerald-50 px-2.5 py-0.5 text-[11px] font-medium text-emerald-700">
-                  Low: {lowCount}
-                </span>
-              </div>
-            </div>
+        <div className="mt-2 grid gap-4 sm:grid-cols-2">
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500">
+              Room
+            </p>
+            <p className="text-sm text-slate-800">
+              {classRow.room ? `Room ${classRow.room}` : '—'}
+            </p>
+          </div>
+          <div>
+            <p className="text-xs uppercase tracking-wide text-slate-500">
+              Logs in range
+            </p>
+            <p className="text-sm text-slate-800">
+              {logs.length} log{logs.length === 1 ? '' : 's'}
+            </p>
           </div>
         </div>
       </section>
 
       <section className="space-y-3">
         <h2 className="text-sm font-semibold text-slate-800">
-          Behavior log timeline
+          Class behavior timeline
         </h2>
 
         {logs.length === 0 ? (
-          <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 p-4 text-xs text-slate-500">
+          <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
             No behavior logs found for this class in the selected range.
           </p>
         ) : (
-          <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white shadow-sm print:border print:shadow-none">
-            <table className="min-w-full divide-y divide-slate-200 text-xs">
-              <thead className="bg-slate-50">
+          <div className="overflow-x-auto rounded-md border border-slate-200 bg-white print:border print:border-slate-300">
+            <table className="min-w-full border-collapse text-left text-xs">
+              <thead className="bg-slate-50 print:bg-slate-100">
                 <tr>
-                  <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-slate-700">
+                  <th className="px-3 py-2 font-semibold text-slate-600">
                     Date / Time
                   </th>
-                  <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-slate-700">
-                    Severity
-                  </th>
-                  <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-slate-700">
+                  <th className="px-3 py-2 font-semibold text-slate-600">
                     Student
                   </th>
-                  <th className="whitespace-nowrap px-3 py-2 text-left font-semibold text-slate-700">
+                  <th className="px-3 py-2 font-semibold text-slate-600">
+                    Room
+                  </th>
+                  <th className="px-3 py-2 font-semibold text-slate-600">
                     Category
                   </th>
-                  <th className="px-3 py-2 text-left font-semibold text-slate-700">
+                  <th className="px-3 py-2 font-semibold text-slate-600">
+                    Severity
+                  </th>
+                  <th className="px-3 py-2 font-semibold text-slate-600">
                     Summary
                   </th>
                 </tr>
               </thead>
-              <tbody className="divide-y divide-slate-100">
+              <tbody>
                 {logs.map((log) => {
-                  const date = new Date(log.created_at);
-                  const dateStr = date.toLocaleDateString();
-                  const timeStr = date.toLocaleTimeString([], {
+                  const created =
+                    typeof log.created_at === 'string'
+                      ? new Date(log.created_at)
+                      : new Date(String(log.created_at));
+
+                  const dateStr = created.toLocaleString(undefined, {
+                    year: 'numeric',
+                    month: 'short',
+                    day: '2-digit',
                     hour: '2-digit',
                     minute: '2-digit',
                   });
 
-                  let sevClass =
-                    'inline-flex rounded-full px-2 py-0.5 text-[11px] font-semibold';
-                  if (log.severity === 'high') {
-                    sevClass +=
-                      ' bg-red-50 text-red-700 ring-1 ring-red-100';
-                  } else if (log.severity === 'medium') {
-                    sevClass +=
-                      ' bg-amber-50 text-amber-700 ring-1 ring-amber-100';
-                  } else {
-                    sevClass +=
-                      ' bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100';
-                  }
+                  const anyLog: any = log;
+                  const stu = anyLog.students as
+                    | (StudentRow & { code?: string | null })
+                    | undefined;
+
+                  const studentName = stu
+                    ? `${stu.first_name ?? ''} ${stu.last_name ?? ''}`.trim()
+                    : '—';
+                  const studentCode = stu?.code ?? null;
+
+                  const room =
+                    anyLog.room ??
+                    anyLog.classes?.room ??
+                    classRow.room ??
+                    '—';
 
                   return (
-                    <tr key={log.id} className="align-top">
-                      <td className="whitespace-nowrap px-3 py-2 text-slate-600">
-                        <div>{dateStr}</div>
-                        <div className="text-[11px] text-slate-400">
-                          {timeStr}
-                        </div>
+                    <tr key={log.id} className="border-t border-slate-100">
+                      <td className="px-3 py-2 align-top text-slate-700">
+                        {dateStr}
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2">
-                        <span className={sevClass}>
-                          {log.severity ?? 'low'}
+                      <td className="px-3 py-2 align-top text-slate-700">
+                        <div>{studentName || '—'}</div>
+                        {studentCode ? (
+                          <div className="text-[11px] text-slate-500">
+                            ({studentCode})
+                          </div>
+                        ) : null}
+                      </td>
+                      <td className="px-3 py-2 align-top text-slate-700">
+                        Room {room}
+                      </td>
+                      <td className="px-3 py-2 align-top">
+                        <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                          {(anyLog.category as string) || '—'}
                         </span>
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-slate-700">
-                        {log.student_name ? (
-                          <>
-                            <div>{log.student_name}</div>
-                            {log.student_code ? (
-                              <div className="text-[11px] text-slate-400">
-                                {log.student_code}
-                              </div>
-                            ) : null}
-                          </>
-                        ) : (
-                          <span className="text-slate-400">
-                            (Unassigned)
-                          </span>
-                        )}
+                      <td className="px-3 py-2 align-top">
+                        <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
+                          {(anyLog.severity as string) || '—'}
+                        </span>
                       </td>
-                      <td className="whitespace-nowrap px-3 py-2 text-slate-600">
-                        {log.category ?? '—'}
-                      </td>
-                      <td className="px-3 py-2 text-slate-700">
-                        {log.summary ?? '—'}
+                      <td className="px-3 py-2 align-top text-slate-700">
+                        {anyLog.summary ?? '—'}
                       </td>
                     </tr>
                   );
