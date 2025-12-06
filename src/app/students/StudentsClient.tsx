@@ -8,6 +8,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import type { Database } from '@/lib/supabase.types';
 import type { StudentWithClass } from './page';
+import StudentRiskChips from '@/components/StudentRiskChips';
 
 type ClassRow = Database['public']['Tables']['classes']['Row'];
 
@@ -57,25 +58,24 @@ export default function StudentsClient({
       <header className="space-y-1">
         <h1 className="text-2xl font-semibold tracking-tight">Students</h1>
         <p className="text-sm text-slate-600">
-          Quick view of students, their classes, and links to logs & reports.
+          Quick view of students, their classes, risk level, and links to logs & reports.
         </p>
       </header>
 
       {/* Filters */}
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="flex flex-1 flex-wrap gap-2">
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex flex-1 flex-col gap-2 sm:flex-row">
           <input
             type="search"
             defaultValue={search}
             onChange={(e) => handleSearchChange(e.target.value)}
             placeholder="Name or code…"
-            className="min-w-[160px] flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+            className="w-full rounded-md border border-slate-300 px-3 py-1.5 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
           />
-
           <select
             value={selectedClassId}
             onChange={(e) => handleClassChange(e.target.value)}
-            className="w-40 rounded-md border border-slate-300 px-2 py-1.5 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 sm:w-44"
           >
             <option value="">All classes</option>
             {classes.map((cls) => (
@@ -84,21 +84,19 @@ export default function StudentsClient({
               </option>
             ))}
           </select>
-
           <select
             value={status}
             onChange={(e) => handleStatusChange(e.target.value)}
-            className="w-36 rounded-md border border-slate-300 px-2 py-1.5 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500"
+            className="w-full rounded-md border border-slate-300 px-2 py-1.5 text-sm shadow-sm focus:border-slate-500 focus:outline-none focus:ring-1 focus:ring-slate-500 sm:w-40"
           >
-            <option value="">All students</option>
+            <option value="">All status</option>
             <option value="live">Live only</option>
-            <option value="inactive">Inactive only</option>
+            <option value="inactive">Inactive</option>
           </select>
         </div>
 
         <p className="text-xs text-slate-500">
-          Showing <span className="font-semibold">{students.length}</span>{' '}
-          students
+          Showing <span className="font-semibold">{students.length}</span> students
         </p>
       </div>
 
@@ -120,6 +118,9 @@ export default function StudentsClient({
                 Room
               </th>
               <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
+                Risk
+              </th>
+              <th className="px-3 py-2 text-right text-xs font-semibold uppercase tracking-wide text-slate-500">
                 Actions
               </th>
             </tr>
@@ -137,8 +138,8 @@ export default function StudentsClient({
                       <span className="font-medium text-slate-900">
                         {fullName || 'Unnamed student'}
                       </span>
-                      {s.is_live === false && (
-                        <span className="mt-0.5 text-xs text-slate-500">
+                      {!s.is_live && (
+                        <span className="mt-0.5 text-[10px] uppercase tracking-wide text-slate-400">
                           Inactive
                         </span>
                       )}
@@ -153,6 +154,9 @@ export default function StudentsClient({
                   <td className="px-3 py-2 align-middle text-slate-700">
                     {s.class_room ?? '—'}
                   </td>
+                  <td className="px-3 py-2 align-middle text-right">
+                    <StudentRiskChips studentId={s.id} />
+                  </td>
                   <td className="px-3 py-2 align-middle">
                     <div className="flex justify-end gap-2">
                       <Link
@@ -162,7 +166,7 @@ export default function StudentsClient({
                         View
                       </Link>
                       <Link
-                        href={`/students/${s.id}/report`}
+                        href={`/students/${s.id}/report?range=30d`}
                         className="inline-flex items-center rounded-full border border-slate-900 bg-slate-900 px-2 py-1 text-xs font-medium text-white hover:bg-slate-800"
                       >
                         Report
@@ -176,7 +180,7 @@ export default function StudentsClient({
             {students.length === 0 && (
               <tr>
                 <td
-                  colSpan={5}
+                  colSpan={6}
                   className="px-3 py-8 text-center text-sm text-slate-500"
                 >
                   No students found. Try adjusting your filters.
