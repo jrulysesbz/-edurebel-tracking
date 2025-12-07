@@ -1,220 +1,167 @@
 import Link from 'next/link';
-import PrintButton from '@/components/PrintButton';
+import { notFound } from 'next/navigation';
 import { supabase } from '@/lib/supabaseServer';
 import type { Database } from '@/lib/supabase.types';
+import PrintButton from '@/components/PrintButton';
 
-type StudentRow = Database['public']['Tables']['students']['Row'];
-type ClassRow = Database['public']['Tables']['classes']['Row'];
-type BehaviorLogRow = Database['public']['Tables']['behavior_logs']['Row'];
+type Db = Database['public'];
+
+type BehaviorLogWithRefs = Db['Tables']['behavior_logs']['Row'] & {
+  students: Pick<Db['Tables']['students']['Row'], 'id' | 'first_name' | 'last_name' | 'code'> | null;
+  classes: Pick<Db['Tables']['classes']['Row'], 'id' | 'name' | 'room'> | null;
+};
 
 type RangeKey = '7d' | '30d' | '90d' | '12m';
 
-function getRangeInfo(rangeParamRaw: string | undefined): {
+type RangeInfo = {
   key: RangeKey;
-  fromIso: string;
+  fromIso: string | null;
   label: string;
-} {
+};
+
+type PageSearchParams = {
+  [key: string]: string | string[] | undefined;
+};
+
+type PageProps = {
+  params: { id: string };
+  searchParams: Promise<PageSearchParams>;
+};
+
+function getRangeInfo(raw: string | undefined): RangeInfo {
   const now = new Date();
-  let key: RangeKey;
+  let key: RangeKey = '30d';
 
-  if (rangeParamRaw === '7d' || rangeParamRaw === '90d' || rangeParamRaw === '12m') {
-    key = rangeParamRaw;
-  } else {
-    key = '30d';
+  if (raw === '7d' || raw === '30d' || raw === '90d' || raw === '12m') {
+    key = raw;
   }
 
-  const from = new Date(now);
+  let fromIso: string | null = null;
+  let label = '';
 
-  switch (key) {
-    case '7d':
-      from.setDate(now.getDate() - 7);
-      break;
-    case '90d':
-      from.setDate(now.getDate() - 90);
-      break;
-    case '12m':
-      from.setMonth(now.getMonth() - 12);
-      break;
-    case '30d':
-    default:
-      from.setDate(now.getDate() - 30);
-      break;
+  if (key === '7d') {
+    const from = new Date(now);
+    from.setDate(from.getDate() - 7);
+    fromIso = from.toISOString();
+    label = 'Last 7 days';
+  } else if (key === '30d') {
+    const from = new Date(now);
+    from.setDate(from.getDate() - 30);
+    fromIso = from.toISOString();
+    label = 'Last 30 days';
+  } else if (key === '90d') {
+    const from = new Date(now);
+    from.setDate(from.getDate() - 90);
+    fromIso = from.toISOString();
+    label = 'Last 90 days';
+  } else if (key === '12m') {
+    const from = new Date(now);
+    from.setMonth(from.getMonth() - 12);
+    fromIso = from.toISOString();
+    label = 'Last 12 months';
   }
 
-  let label = 'Last 30 days';
-  if (key === '7d') label = 'Last 7 days';
-  if (key === '90d') label = 'Last 90 days';
-  if (key === '12m') label = 'Last 12 months';
-
-  return {
-    key,
-    fromIso: from.toISOString(),
-    label,
-  };
+  return { key, fromIso, label };
 }
 
-async function getStudentAndClass(
-  studentId: string
-): Promise<{ student: StudentRow | null; classRow: ClassRow | null }> {
-  const supabaseAny = supabase as any;
-
-  const { data, error } = await supabaseAny
-    .from('students')
-    .select(
-      `
-        id,
-        first_name,
-        last_name,
-        code,
-        class_id,
-        classes:class_id (
-          id,
-          name,
-          room
-        )
-      `
-    )
-    .eq('id', studentId)
-    .maybeSingle();
-
-  if (error) {
-    console.error('Error loading student/class for report', error);
-    return { student: null, classRow: null };
-  }
-
-  if (!data) {
-    return { student: null, classRow: null };
-  }
-
-  const stu: StudentRow = {
-    id: data.id,
-    first_name: data.first_name,
-    last_name: data.last_name,
-    code: data.code,
-    class_id: data.class_id,
-  };
-
-  const cls: ClassRow | null = data.classes
-    ? {
-        id: data.classes.id,
-        name: data.classes.name,
-        room: data.classes.room,
-      }
-    : null;
-
-  return { student: stu, classRow: cls };
+function firstParam(value: string | string[] | undefined): string | undefined {
+  if (Array.isArray(value)) return value[0];
+  return value;
 }
 
-async function getStudentLogs(
-  studentId: string,
-  fromIso: string
-): Promise<BehaviorLogRow[]> {
-  const supabaseAny = supabase as any;
-
-  try {
-    let query = supabaseAny
-      .from('behavior_logs')
-      .select(
-        `
-        id,
-        created_at,
-        student_id,
-        class_id,
-        room,
-        category,
-        severity,
-        summary,
-        students:student_id (
-          id,
-          first_name,
-          last_name,
-          code
-        ),
-        classes:class_id (
-          id,
-          name,
-          room
-        )
-      `
-      )
-      .eq('student_id', studentId)
-      .order('created_at', { ascending: false });
-
-    if (fromIso) {
-      query = query.gte('created_at', fromIso);
-    }
-
-    const { data, error } = await query;
-
-    if (error) {
-      console.error('Error loading behavior logs for student report', error);
-      return [];
-    }
-
-    return (data ?? []) as BehaviorLogRow[];
-  } catch (err) {
-    console.error('Unexpected error loading student logs', err);
-    return [];
+function severityBadgeClass(severity: string | null): string {
+  const base =
+    'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold';
+  if (severity === 'high') {
+    return `${base} bg-rose-100 text-rose-700`;
   }
+  if (severity === 'medium') {
+    return `${base} bg-amber-100 text-amber-700`;
+  }
+  if (severity === 'low') {
+    return `${base} bg-emerald-100 text-emerald-700`;
+  }
+  return `${base} bg-slate-100 text-slate-600`;
 }
 
-export const dynamic = 'force-dynamic';
+export default async function StudentReportPage({ params, searchParams }: PageProps) {
+  const { id } = params;
+  const resolvedSearch = await searchParams;
 
-export default async function StudentReportPage({
-  params,
-  searchParams,
-}: {
-  params: Promise<{ id: string }>;
-  searchParams: Promise<{ range?: string | string[] }>;
-}) {
-  const { id } = await params;
-  const sp = (await searchParams) ?? {};
-  const rangeParamRaw = sp.range;
-  const rangeParam =
-    Array.isArray(rangeParamRaw) && rangeParamRaw.length > 0
-      ? rangeParamRaw[0]
-      : rangeParamRaw;
+  const rangeParamRaw = resolvedSearch?.range;
+  const rangeParam = firstParam(rangeParamRaw);
 
-  const { key: rangeKey, fromIso, label: rangeLabel } = getRangeInfo(
-    rangeParam ?? undefined
-  );
+  const { key: rangeKey, fromIso, label: rangeLabel } = getRangeInfo(rangeParam);
   const exportUrl = `/api/student-report-export?student_id=${encodeURIComponent(
-    id
+    id,
   )}&range=${encodeURIComponent(rangeKey)}`;
 
-  const [{ student, classRow }, logs] = await Promise.all([
-    getStudentAndClass(id),
-    getStudentLogs(id, fromIso),
-  ]);
+  const supabaseAny = supabase as any;
 
-  if (!student) {
-    return (
-      <main className="mx-auto max-w-4xl px-4 py-10">
-        <h1 className="text-xl font-semibold text-red-700">
-          Student not found
-        </h1>
-        <p className="mt-2 text-sm text-slate-600">
-          We couldn&apos;t find that student record. Please go back to the
-          Students list and try again.
-        </p>
-        <div className="mt-4">
-          <Link
-            href="/students"
-            className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 shadow-sm hover:bg-slate-50"
-          >
-            Back to Students
-          </Link>
-        </div>
-      </main>
-    );
+  const [{ data: studentRow, error: studentError }, { data: logsData, error: logsError }] =
+    await Promise.all([
+      supabaseAny
+        .from('students')
+        .select('id, first_name, last_name, code, class_id')
+        .eq('id', id)
+        .maybeSingle(),
+      supabaseAny
+        .from('behavior_logs')
+        .select(
+          `
+          id,
+          created_at,
+          student_id,
+          class_id,
+          room,
+          category,
+          severity,
+          summary,
+          students:student_id (
+            id,
+            first_name,
+            last_name,
+            code
+          ),
+          classes:class_id (
+            id,
+            name,
+            room
+          )
+        `,
+        )
+        .eq('student_id', id)
+        .order('created_at', { ascending: false })
+        .gte('created_at', fromIso ?? '1970-01-01T00:00:00Z'),
+    ]);
+
+  if (studentError) {
+    console.error('Error loading student for report', studentError);
+    throw studentError;
   }
 
-  const studentName = `${student.first_name ?? ''} ${
-    student.last_name ?? ''
-  }`.trim();
+  if (!studentRow) {
+    notFound();
+  }
+
+  if (logsError) {
+    console.error('Error loading student logs for report', logsError);
+  }
+
+  const logs: BehaviorLogWithRefs[] = (logsData ?? []) as BehaviorLogWithRefs[];
+
+  const totalLogs = logs.length;
+  const highCount = logs.filter((l) => l.severity === 'high').length;
+  const mediumCount = logs.filter((l) => l.severity === 'medium').length;
+  const lowCount = logs.filter((l) => l.severity === 'low').length;
+
+  const studentLabel = `${studentRow.last_name ?? ''}${studentRow.first_name ?? ''}${
+    studentRow.code ? ` (${studentRow.code})` : ''
+  }`.trim() || 'Unknown student';
 
   return (
-    <main className="mx-auto max-w-5xl space-y-6 px-4 py-6 print:px-0">
+    <main className="space-y-4">
+      {/* Header with range, Print, CSV, and View in logs */}
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">
@@ -228,6 +175,12 @@ export default async function StudentReportPage({
             range filter to control the window, then print or export for
             meetings, SSTs, and parent conferences.
           </p>
+          <p className="text-xs text-slate-500">
+            Student:{' '}
+            <span className="font-semibold text-slate-800">
+              {studentLabel}
+            </span>
+          </p>
         </div>
 
         <div className="no-print flex items-center gap-2">
@@ -238,141 +191,130 @@ export default async function StudentReportPage({
           >
             Export CSV
           </a>
+          <Link
+            href={{
+              pathname: '/logs',
+              query: {
+                range: rangeKey,
+                student_id: id,
+              },
+            }}
+            className="inline-flex items-center rounded-md border border-slate-300 bg-white px-3 py-1.5 text-[11px] font-semibold text-slate-700 shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-slate-500 focus:ring-offset-2"
+          >
+            View in logs
+          </Link>
         </div>
       </header>
 
-      <section className="grid gap-4 rounded-lg border border-slate-200 bg-white p-4 text-sm print:border-none print:bg-transparent">
-        <div className="flex flex-wrap items-baseline justify-between gap-2">
-          <div className="space-y-0.5">
-            <p className="text-xs uppercase tracking-wide text-slate-500">
-              Student
-            </p>
-            <p className="text-base font-semibold text-slate-900">
-              {studentName || 'Unnamed student'}
-              {student.code ? (
-                <span className="ml-2 text-xs font-normal text-slate-500">
-                  ({student.code})
-                </span>
-              ) : null}
-            </p>
-          </div>
-          <div className="no-print">
-            <Link
-              href={`/students/${student.id}`}
-              className="inline-flex items-center rounded-md border border-slate-200 bg-slate-50 px-2.5 py-1 text-xs font-medium text-slate-700 hover:bg-slate-100"
-            >
-              View student profile
-            </Link>
-          </div>
+      {/* Summary cards */}
+      <section className="grid gap-3 sm:grid-cols-4">
+        <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Total logs
+          </p>
+          <p className="mt-1 text-xl font-semibold text-slate-900">{totalLogs}</p>
         </div>
-
-        <div className="mt-2 grid gap-4 sm:grid-cols-2">
-          <div>
-            <p className="text-xs uppercase tracking-wide text-slate-500">
-              Class
-            </p>
-            <p className="text-sm text-slate-800">
-              {classRow?.name ?? '—'}
-              {classRow?.room ? (
-                <span className="ml-1 text-xs text-slate-500">
-                  (Room {classRow.room})
-                </span>
-              ) : null}
-            </p>
-          </div>
-          <div>
-            <p className="text-xs uppercase tracking-wide text-slate-500">
-              Logs in range
-            </p>
-            <p className="text-sm text-slate-800">
-              {logs.length} log{logs.length === 1 ? '' : 's'}
-            </p>
-          </div>
+        <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            High
+          </p>
+          <p className="mt-1 text-xl font-semibold text-rose-700">{highCount}</p>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Medium
+          </p>
+          <p className="mt-1 text-xl font-semibold text-amber-700">{mediumCount}</p>
+        </div>
+        <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-sm">
+          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+            Low
+          </p>
+          <p className="mt-1 text-xl font-semibold text-emerald-700">{lowCount}</p>
         </div>
       </section>
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-semibold text-slate-800">
-          Behavior timeline
-        </h2>
+      {/* Legend / help */}
+      <section className="no-print rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
+        <p className="font-semibold text-slate-700">How to use this report</p>
+        <ul className="mt-1 list-disc space-y-1 pl-4">
+          <li>
+            <span className="font-semibold">Range</span> controls the time window. All
+            counts, charts, and exports respect this.
+          </li>
+          <li>
+            <span className="font-semibold">Severity</span> shows the balance of low,
+            medium, and high concerns over time.
+          </li>
+          <li>
+            Use <span className="font-semibold">Print</span> for PDF handouts and{' '}
+            <span className="font-semibold">Export CSV</span> for deeper analysis or
+            sharing with teams.
+          </li>
+        </ul>
+      </section>
 
-        {logs.length === 0 ? (
-          <p className="rounded-md border border-dashed border-slate-200 bg-slate-50 px-3 py-2 text-xs text-slate-600">
-            No behavior logs found for this student in the selected range.
-          </p>
-        ) : (
-          <div className="overflow-x-auto rounded-md border border-slate-200 bg-white print:border print:border-slate-300">
-            <table className="min-w-full border-collapse text-left text-xs">
-              <thead className="bg-slate-50 print:bg-slate-100">
+      {/* Logs table */}
+      <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
+        <div className="border-b border-slate-100 px-4 py-2 text-xs font-semibold text-slate-600">
+          Logs ({totalLogs})
+        </div>
+        <div className="max-h-[540px] overflow-auto text-xs">
+          <table className="min-w-full border-separate border-spacing-y-1">
+            <thead className="sticky top-0 bg-white">
+              <tr className="text-[11px] text-slate-500">
+                <th className="px-3 py-1 text-left">Date / Time</th>
+                <th className="px-3 py-1 text-left">Class / Room</th>
+                <th className="px-3 py-1 text-left">Severity</th>
+                <th className="px-3 py-1 text-left">Category</th>
+                <th className="px-3 py-1 text-left">Summary</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((log) => {
+                const cls = log.classes;
+                const classLabel = cls
+                  ? `${cls.name}${cls.room ? ` · ${cls.room}` : ''}`
+                  : log.room || '—';
+
+                return (
+                  <tr key={log.id} className="bg-slate-50">
+                    <td className="whitespace-nowrap px-3 py-1 align-top text-[11px] text-slate-600">
+                      {log.created_at
+                        ? new Date(log.created_at).toLocaleString()
+                        : 'Unknown date'}
+                    </td>
+                    <td className="px-3 py-1 align-top text-[11px] text-slate-600">
+                      {classLabel}
+                    </td>
+                    <td className="px-3 py-1 align-top">
+                      <span className={severityBadgeClass(log.severity)}>
+                        {log.severity ?? '—'}
+                      </span>
+                    </td>
+                    <td className="px-3 py-1 align-top text-[11px] capitalize">
+                      {log.category ?? '—'}
+                    </td>
+                    <td className="px-3 py-1 align-top text-[11px] text-slate-700">
+                      {log.summary ?? '—'}
+                    </td>
+                  </tr>
+                );
+              })}
+
+              {logs.length === 0 && (
                 <tr>
-                  <th className="px-3 py-2 font-semibold text-slate-600">
-                    Date / Time
-                  </th>
-                  <th className="px-3 py-2 font-semibold text-slate-600">
-                    Class / Room
-                  </th>
-                  <th className="px-3 py-2 font-semibold text-slate-600">
-                    Category
-                  </th>
-                  <th className="px-3 py-2 font-semibold text-slate-600">
-                    Severity
-                  </th>
-                  <th className="px-3 py-2 font-semibold text-slate-600">
-                    Summary
-                  </th>
+                  <td
+                    colSpan={5}
+                    className="px-3 py-4 text-center text-xs text-slate-500"
+                  >
+                    No logs for this student in this range yet.
+                  </td>
                 </tr>
-              </thead>
-              <tbody>
-                {logs.map((log) => {
-                  const created =
-                    typeof log.created_at === 'string'
-                      ? new Date(log.created_at)
-                      : new Date(String(log.created_at));
-
-                  const dateStr = created.toLocaleString(undefined, {
-                    year: 'numeric',
-                    month: 'short',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                  });
-
-                  const anyLog: any = log;
-                  const cls = anyLog.classes;
-                  const className = cls?.name ?? classRow?.name ?? '—';
-                  const room = anyLog.room ?? cls?.room ?? classRow?.room ?? '—';
-
-                  return (
-                    <tr key={log.id} className="border-t border-slate-100">
-                      <td className="px-3 py-2 align-top text-slate-700">
-                        {dateStr}
-                      </td>
-                      <td className="px-3 py-2 align-top text-slate-700">
-                        <div>{className}</div>
-                        <div className="text-[11px] text-slate-500">
-                          Room {room}
-                        </div>
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
-                          {(anyLog.category as string) || '—'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 align-top">
-                        <span className="inline-flex rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-medium text-slate-700">
-                          {(anyLog.severity as string) || '—'}
-                        </span>
-                      </td>
-                      <td className="px-3 py-2 align-top text-slate-700">
-                        {anyLog.summary ?? '—'}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
-          </div>
-        )}
+              )}
+            </tbody>
+          </table>
+        </div>
       </section>
     </main>
   );
