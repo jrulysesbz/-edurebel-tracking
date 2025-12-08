@@ -1,167 +1,114 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { supabase } from '@/lib/supabaseServer';
-import type { Database } from '@/lib/supabase.types';
+import { getRangeInfo } from '@/lib/range';
 import PrintButton from '@/components/PrintButton';
 
-type Db = Database['public'];
-
-type BehaviorLogWithRefs = Db['Tables']['behavior_logs']['Row'] & {
-  students: Pick<Db['Tables']['students']['Row'], 'id' | 'first_name' | 'last_name' | 'code'> | null;
-  classes: Pick<Db['Tables']['classes']['Row'], 'id' | 'name' | 'room'> | null;
-};
-
-type RangeKey = '7d' | '30d' | '90d' | '12m';
-
-type RangeInfo = {
-  key: RangeKey;
-  fromIso: string | null;
-  label: string;
-};
-
-type PageSearchParams = {
-  [key: string]: string | string[] | undefined;
-};
-
 type PageProps = {
-  params: { id: string };
-  searchParams: Promise<PageSearchParams>;
+  params: Promise<{ id: string }>;
+  searchParams: Promise<{ [key: string]: string | string[] | undefined }>;
 };
 
-function getRangeInfo(raw: string | undefined): RangeInfo {
-  const now = new Date();
-  let key: RangeKey = '30d';
+export default async function StudentReportPage(props: PageProps) {
+  // ✅ Next.js 15: params & searchParams are async
+  const { id } = await props.params;
+  const resolvedSearch = await props.searchParams;
 
-  if (raw === '7d' || raw === '30d' || raw === '90d' || raw === '12m') {
-    key = raw;
-  }
-
-  let fromIso: string | null = null;
-  let label = '';
-
-  if (key === '7d') {
-    const from = new Date(now);
-    from.setDate(from.getDate() - 7);
-    fromIso = from.toISOString();
-    label = 'Last 7 days';
-  } else if (key === '30d') {
-    const from = new Date(now);
-    from.setDate(from.getDate() - 30);
-    fromIso = from.toISOString();
-    label = 'Last 30 days';
-  } else if (key === '90d') {
-    const from = new Date(now);
-    from.setDate(from.getDate() - 90);
-    fromIso = from.toISOString();
-    label = 'Last 90 days';
-  } else if (key === '12m') {
-    const from = new Date(now);
-    from.setMonth(from.getMonth() - 12);
-    fromIso = from.toISOString();
-    label = 'Last 12 months';
-  }
-
-  return { key, fromIso, label };
-}
-
-function firstParam(value: string | string[] | undefined): string | undefined {
-  if (Array.isArray(value)) return value[0];
-  return value;
-}
-
-function severityBadgeClass(severity: string | null): string {
-  const base =
-    'inline-flex items-center rounded-full px-2 py-0.5 text-[11px] font-semibold';
-  if (severity === 'high') {
-    return `${base} bg-rose-100 text-rose-700`;
-  }
-  if (severity === 'medium') {
-    return `${base} bg-amber-100 text-amber-700`;
-  }
-  if (severity === 'low') {
-    return `${base} bg-emerald-100 text-emerald-700`;
-  }
-  return `${base} bg-slate-100 text-slate-600`;
-}
-
-export default async function StudentReportPage({ params, searchParams }: PageProps) {
-  const { id } = params;
-  const resolvedSearch = await searchParams;
-
+  // ✅ Normalize range from URL (handles ?range=7d, &range=30d, etc.)
   const rangeParamRaw = resolvedSearch?.range;
-  const rangeParam = firstParam(rangeParamRaw);
+  const rangeParam =
+    Array.isArray(rangeParamRaw) && rangeParamRaw.length > 0
+      ? rangeParamRaw[0]
+      : rangeParamRaw;
 
+  // ✅ Shared helper for range window
   const { key: rangeKey, fromIso, label: rangeLabel } = getRangeInfo(rangeParam);
+
+  // ✅ CSV export endpoint wired to same range
   const exportUrl = `/api/student-report-export?student_id=${encodeURIComponent(
     id,
   )}&range=${encodeURIComponent(rangeKey)}`;
 
   const supabaseAny = supabase as any;
 
-  const [{ data: studentRow, error: studentError }, { data: logsData, error: logsError }] =
-    await Promise.all([
-      supabaseAny
-        .from('students')
-        .select('id, first_name, last_name, code, class_id')
-        .eq('id', id)
-        .maybeSingle(),
-      supabaseAny
-        .from('behavior_logs')
-        .select(
-          `
-          id,
-          created_at,
-          student_id,
-          class_id,
-          room,
-          category,
-          severity,
-          summary,
-          students:student_id (
-            id,
-            first_name,
-            last_name,
-            code
-          ),
-          classes:class_id (
-            id,
-            name,
-            room
-          )
-        `,
-        )
-        .eq('student_id', id)
-        .order('created_at', { ascending: false })
-        .gte('created_at', fromIso ?? '1970-01-01T00:00:00Z'),
-    ]);
+  // 🔹 Load student + class
+  const { data: student, error: studentError } = await supabaseAny
+    .from('students')
+    .select(
+      `
+      id,
+      first_name,
+      last_name,
+      code,
+      class_id,
+      classes:class_id (
+        id,
+        name,
+        room
+      )
+    `,
+    )
+    .eq('id', id)
+    .single();
 
-  if (studentError) {
+  if (studentError || !student) {
     console.error('Error loading student for report', studentError);
-    throw studentError;
+    return notFound();
   }
 
-  if (!studentRow) {
-    notFound();
+  // 🔹 Load this student's logs in the selected range
+  let logsQuery = supabaseAny
+    .from('behavior_logs')
+    .select(
+      `
+      id,
+      created_at,
+      student_id,
+      class_id,
+      room,
+      category,
+      severity,
+      summary,
+      students:student_id (
+        id,
+        first_name,
+        last_name,
+        code
+      ),
+      classes:class_id (
+        id,
+        name,
+        room
+      )
+    `,
+    )
+    .eq('student_id', id)
+    .order('created_at', { ascending: false });
+
+  if (fromIso) {
+    logsQuery = logsQuery.gte('created_at', fromIso);
   }
+
+  const { data: logs, error: logsError } = await logsQuery;
 
   if (logsError) {
-    console.error('Error loading student logs for report', logsError);
+    console.error('Error loading behavior logs for student report', logsError);
   }
 
-  const logs: BehaviorLogWithRefs[] = (logsData ?? []) as BehaviorLogWithRefs[];
+  const safeLogs = (logs ?? []) as any[];
 
-  const totalLogs = logs.length;
-  const highCount = logs.filter((l) => l.severity === 'high').length;
-  const mediumCount = logs.filter((l) => l.severity === 'medium').length;
-  const lowCount = logs.filter((l) => l.severity === 'low').length;
+  const fullName =
+    [student.first_name, student.last_name].filter(Boolean).join(' ') ||
+    'Unnamed student';
 
-  const studentLabel = `${studentRow.last_name ?? ''}${studentRow.first_name ?? ''}${
-    studentRow.code ? ` (${studentRow.code})` : ''
-  }`.trim() || 'Unknown student';
+  const classLabel =
+    student.classes?.name && student.classes?.room
+      ? `${student.classes.name} · Room ${student.classes.room}`
+      : student.classes?.name || student.classes?.room || '';
 
   return (
-    <main className="space-y-4">
-      {/* Header with range, Print, CSV, and View in logs */}
+    <main className="space-y-6 p-6">
+      {/* Header with range + actions */}
       <header className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="space-y-1">
           <h1 className="text-2xl font-semibold tracking-tight">
@@ -177,9 +124,18 @@ export default async function StudentReportPage({ params, searchParams }: PagePr
           </p>
           <p className="text-xs text-slate-500">
             Student:{' '}
-            <span className="font-semibold text-slate-800">
-              {studentLabel}
-            </span>
+            <span className="font-semibold text-slate-800">{fullName}</span>
+            {student.code && (
+              <>
+                {' · '}
+                <span className="font-mono">{student.code}</span>
+              </>
+            )}
+            {classLabel && (
+              <>
+                {' · '}Class: {classLabel}
+              </>
+            )}
           </p>
         </div>
 
@@ -206,115 +162,97 @@ export default async function StudentReportPage({ params, searchParams }: PagePr
         </div>
       </header>
 
-      {/* Summary cards */}
-      <section className="grid gap-3 sm:grid-cols-4">
-        <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-sm">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            Total logs
-          </p>
-          <p className="mt-1 text-xl font-semibold text-slate-900">{totalLogs}</p>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-sm">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            High
-          </p>
-          <p className="mt-1 text-xl font-semibold text-rose-700">{highCount}</p>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-sm">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            Medium
-          </p>
-          <p className="mt-1 text-xl font-semibold text-amber-700">{mediumCount}</p>
-        </div>
-        <div className="rounded-lg border border-slate-200 bg-white p-3 text-xs shadow-sm">
-          <p className="text-[11px] font-semibold uppercase tracking-wide text-slate-500">
-            Low
-          </p>
-          <p className="mt-1 text-xl font-semibold text-emerald-700">{lowCount}</p>
-        </div>
-      </section>
-
-      {/* Legend / help */}
-      <section className="no-print rounded-md border border-dashed border-slate-300 bg-slate-50 px-3 py-2 text-[11px] text-slate-600">
-        <p className="font-semibold text-slate-700">How to use this report</p>
-        <ul className="mt-1 list-disc space-y-1 pl-4">
-          <li>
-            <span className="font-semibold">Range</span> controls the time window. All
-            counts, charts, and exports respect this.
-          </li>
-          <li>
-            <span className="font-semibold">Severity</span> shows the balance of low,
-            medium, and high concerns over time.
-          </li>
-          <li>
-            Use <span className="font-semibold">Print</span> for PDF handouts and{' '}
-            <span className="font-semibold">Export CSV</span> for deeper analysis or
-            sharing with teams.
-          </li>
-        </ul>
+      {/* Simple range chips (optional but nice) */}
+      <section className="no-print flex flex-wrap items-center gap-2 rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs">
+        <span className="font-semibold uppercase tracking-wide text-slate-500">
+          Range
+        </span>
+        {[
+          { key: '7d', label: 'Last 7 days' },
+          { key: '30d', label: 'Last 30 days' },
+          { key: '90d', label: 'Last 90 days' },
+          { key: '12m', label: 'Last 12 months' },
+        ].map((opt) => (
+          <Link
+            key={opt.key}
+            href={{
+              pathname: `/students/${id}/report`,
+              query: { range: opt.key },
+            }}
+            className={`inline-flex items-center rounded-full px-3 py-1 text-xs font-medium ${
+              rangeKey === opt.key
+                ? 'bg-slate-900 text-white'
+                : 'bg-white text-slate-700 ring-1 ring-slate-200 hover:bg-slate-100'
+            }`}
+          >
+            {opt.label}
+          </Link>
+        ))}
       </section>
 
       {/* Logs table */}
-      <section className="rounded-lg border border-slate-200 bg-white shadow-sm">
-        <div className="border-b border-slate-100 px-4 py-2 text-xs font-semibold text-slate-600">
-          Logs ({totalLogs})
-        </div>
-        <div className="max-h-[540px] overflow-auto text-xs">
-          <table className="min-w-full border-separate border-spacing-y-1">
-            <thead className="sticky top-0 bg-white">
-              <tr className="text-[11px] text-slate-500">
-                <th className="px-3 py-1 text-left">Date / Time</th>
-                <th className="px-3 py-1 text-left">Class / Room</th>
-                <th className="px-3 py-1 text-left">Severity</th>
-                <th className="px-3 py-1 text-left">Category</th>
-                <th className="px-3 py-1 text-left">Summary</th>
+      <section className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+        <table className="min-w-full border-collapse text-xs">
+          <thead>
+            <tr className="bg-slate-50 text-left text-[11px] font-semibold uppercase tracking-wide text-slate-500">
+              <th className="px-2 py-1.5">Date / Time</th>
+              <th className="px-2 py-1.5">Class</th>
+              <th className="px-2 py-1.5">Room</th>
+              <th className="px-2 py-1.5">Severity</th>
+              <th className="px-2 py-1.5">Category</th>
+              <th className="px-2 py-1.5">Summary</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {safeLogs.length === 0 && (
+              <tr>
+                <td
+                  colSpan={6}
+                  className="px-2 py-4 text-center text-[11px] text-slate-500"
+                >
+                  No logs found in this range for this student.
+                </td>
               </tr>
-            </thead>
-            <tbody>
-              {logs.map((log) => {
-                const cls = log.classes;
-                const classLabel = cls
-                  ? `${cls.name}${cls.room ? ` · ${cls.room}` : ''}`
-                  : log.room || '—';
+            )}
 
-                return (
-                  <tr key={log.id} className="bg-slate-50">
-                    <td className="whitespace-nowrap px-3 py-1 align-top text-[11px] text-slate-600">
-                      {log.created_at
-                        ? new Date(log.created_at).toLocaleString()
-                        : 'Unknown date'}
-                    </td>
-                    <td className="px-3 py-1 align-top text-[11px] text-slate-600">
-                      {classLabel}
-                    </td>
-                    <td className="px-3 py-1 align-top">
-                      <span className={severityBadgeClass(log.severity)}>
-                        {log.severity ?? '—'}
-                      </span>
-                    </td>
-                    <td className="px-3 py-1 align-top text-[11px] capitalize">
-                      {log.category ?? '—'}
-                    </td>
-                    <td className="px-3 py-1 align-top text-[11px] text-slate-700">
-                      {log.summary ?? '—'}
-                    </td>
-                  </tr>
-                );
-              })}
-
-              {logs.length === 0 && (
-                <tr>
-                  <td
-                    colSpan={5}
-                    className="px-3 py-4 text-center text-xs text-slate-500"
+            {safeLogs.map((log) => (
+              <tr key={log.id} className="hover:bg-slate-50">
+                <td className="whitespace-nowrap px-2 py-1.5 text-[11px] text-slate-600">
+                  {log.created_at
+                    ? new Date(log.created_at).toLocaleString()
+                    : ''}
+                </td>
+                <td className="px-2 py-1.5 text-[11px] text-slate-700">
+                  {log.classes?.name || '—'}
+                </td>
+                <td className="px-2 py-1.5 text-[11px] text-slate-700">
+                  {log.classes?.room || log.room || '—'}
+                </td>
+                <td className="px-2 py-1.5">
+                  <span
+                    className={`inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold capitalize ${
+                      log.severity === 'high'
+                        ? 'bg-rose-100 text-rose-700'
+                        : log.severity === 'medium'
+                        ? 'bg-amber-100 text-amber-700'
+                        : log.severity === 'low'
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-slate-100 text-slate-600'
+                    }`}
                   >
-                    No logs for this student in this range yet.
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+                    {log.severity || 'n/a'}
+                  </span>
+                </td>
+                <td className="px-2 py-1.5 text-[11px] capitalize text-slate-700">
+                  {log.category || 'other'}
+                </td>
+                <td className="max-w-xs px-2 py-1.5 text-[11px] text-slate-700">
+                  {log.summary}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </section>
     </main>
   );
